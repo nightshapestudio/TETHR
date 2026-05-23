@@ -3,6 +3,7 @@ import { useProjectStore } from '../store/useProjectStore';
 import { WaveformCanvas } from './WaveformCanvas';
 import { BeatGrid } from './BeatGrid';
 import { ArrangementLane } from './ArrangementLane';
+import { snapForward } from '../lib/snapUtils';
 
 export function Timeline() {
   const {
@@ -20,6 +21,9 @@ export function Timeline() {
     addArrangementClip,
     updateArrangementClip,
     playbackState,
+    snapEnabled,
+    snapResolution,
+    snapGuidePosition,
   } = useProjectStore();
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -108,11 +112,12 @@ export function Timeline() {
     }
   }, [importTrack]);
 
-  // Calculate insertion position: end of current arrangement, or 0 if empty
+  // Calculate insertion position: end of current arrangement (snap forward to next grid boundary)
   const getInsertPosition = useCallback(() => {
-    const clips = useProjectStore.getState().arrangementClips;
+    const { arrangementClips: clips, snapEnabled: se, snapResolution: sr, bpm: b } = useProjectStore.getState();
     if (clips.length === 0) return 0;
-    return Math.max(...clips.map(c => c.timelinePosition + c.sourceDuration));
+    const rawEnd = Math.max(...clips.map(c => c.timelinePosition + c.sourceDuration));
+    return snapForward(rawEnd, b, se, sr);
   }, []);
 
   const renderSegmentOverlay = useCallback((trackId: string, duration: number, color: string, trackName: string) => {
@@ -171,7 +176,7 @@ export function Timeline() {
               });
               // Clip stays selected (same id), no extra selectClip call needed
             } else {
-              // APPEND MODE — add new clip at end of arrangement
+              // APPEND MODE — add new clip at end of arrangement, snapped to grid
               const insertPos = getInsertPosition();
               addArrangementClip({
                 id: crypto.randomUUID(),
@@ -237,6 +242,12 @@ export function Timeline() {
 
   const playheadX = 100 + (playheadPosition - scrollPosition) * pixelsPerSecond;
   const playheadVisible = playheadX >= 100 && playheadX <= containerWidth + 100;
+
+  // Snap guide X position in pixels (null when not dragging)
+  const snapGuideX = snapGuidePosition !== null
+    ? 100 + (snapGuidePosition - scrollPosition) * pixelsPerSecond
+    : null;
+  const snapGuideVisible = snapGuideX !== null && snapGuideX >= 100 && snapGuideX <= containerWidth + 100;
 
   return (
     <div
@@ -332,6 +343,19 @@ export function Timeline() {
               pixelsPerSecond={pixelsPerSecond}
               scrollOffset={scrollPosition}
             />
+
+            {/* Snap guide — cyan vertical line shown while dragging a clip */}
+            {snapGuideVisible && (
+              <div
+                className="absolute inset-y-0 pointer-events-none z-40"
+                style={{
+                  left: snapGuideX!,
+                  width: 1,
+                  background: 'hsl(176 82% 60% / 0.65)',
+                  boxShadow: '0 0 5px hsl(176 82% 60% / 0.45)',
+                }}
+              />
+            )}
           </div>
         )}
       </div>

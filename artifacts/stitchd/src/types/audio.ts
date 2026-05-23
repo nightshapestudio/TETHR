@@ -61,3 +61,4 @@ export type SegmentMode = 4 | 8 | 16;
 export type PlaybackState = 'stopped' | 'playing' | 'paused';
 export type ToolMode = 'select' | 'slip' | 'warp' | 'split';
 export type BpmSource = 'auto' | 'tap' | 'manual';
+export type SnapResolution = 'bar' | 'beat' | '1/2-beat' | '1/4-beat';

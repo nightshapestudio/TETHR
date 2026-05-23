@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { AudioTrack, Clip, PlaybackState, SegmentMode, ToolMode, BpmSource } from '../types/audio';
+import { AudioTrack, Clip, PlaybackState, SegmentMode, ToolMode, BpmSource, SnapResolution } from '../types/audio';
 
 // ---------------------------------------------------------------------------
 // BPM detection — energy autocorrelation, runs inline after decode
@@ -116,6 +116,9 @@ interface ProjectState {
   isLooping: boolean;
   toolMode: ToolMode;
   projectName: string;
+  snapEnabled: boolean;
+  snapResolution: SnapResolution;
+  snapGuidePosition: number | null;
 
   importTrack: (file: File) => Promise<void>;
   removeTrack: (id: string) => void;
@@ -136,6 +139,9 @@ interface ProjectState {
   setPlayheadPosition: (pos: number) => void;
   setLoopRegion: (region: { start: number; end: number } | null) => void;
   setToolMode: (mode: ToolMode) => void;
+  setSnapEnabled: (v: boolean) => void;
+  setSnapResolution: (r: SnapResolution) => void;
+  setSnapGuidePosition: (pos: number | null) => void;
   triggerPlay: (fromPosition?: number) => void;
   saveProject: () => void;
   loadProject: (json: string) => void;
@@ -171,6 +177,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   isLooping: false,
   toolMode: 'select',
   projectName: 'Untitled Project',
+  snapEnabled: true,
+  snapResolution: 'bar' as SnapResolution,
+  snapGuidePosition: null,
 
   importTrack: async (file: File) => {
     // Decode using a temporary AudioContext — closed immediately after
@@ -364,6 +373,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   setPlayheadPosition: (pos: number) => set({ playheadPosition: pos }),
   setLoopRegion: (region: { start: number; end: number } | null) => set({ loopRegion: region }),
   setToolMode: (mode: ToolMode) => set({ toolMode: mode }),
+  setSnapEnabled: (v: boolean) => set({ snapEnabled: v }),
+  setSnapResolution: (r: SnapResolution) => set({ snapResolution: r }),
+  setSnapGuidePosition: (pos: number | null) => set({ snapGuidePosition: pos }),
 
   triggerPlay: (fromPosition?: number) => set((state) => {
     const pos = fromPosition ?? state.playheadPosition;

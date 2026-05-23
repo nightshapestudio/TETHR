@@ -2,8 +2,8 @@ import React, { useRef, useState } from 'react';
 import { useProjectStore } from '../store/useProjectStore';
 import { Button } from './ui/button';
 import { Slider } from './ui/slider';
-import { Volume2, VolumeX, Trash2, Activity, Scissors, Hand, MousePointer2, RotateCcw } from 'lucide-react';
-import { SegmentMode, BpmSource } from '../types/audio';
+import { Volume2, VolumeX, Trash2, Activity, Scissors, Hand, MousePointer2, RotateCcw, Magnet } from 'lucide-react';
+import { SegmentMode, BpmSource, SnapResolution } from '../types/audio';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 
 function formatConfidence(c: number): string {
@@ -26,6 +26,10 @@ export function LeftSidebar() {
     setSegmentMode,
     toolMode,
     setToolMode,
+    snapEnabled,
+    snapResolution,
+    setSnapEnabled,
+    setSnapResolution,
   } = useProjectStore();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -35,7 +39,6 @@ export function LeftSidebar() {
     const files = e.target.files;
     if (files) {
       Array.from(files).forEach(file => importTrack(file));
-      // Reset so the same file can be re-imported
       e.target.value = '';
     }
   };
@@ -70,6 +73,13 @@ export function LeftSidebar() {
 
   const refTrack = tracks.find(t => t.isReference);
   const canRevertToAuto = bpmSource === 'manual' && refTrack?.estimatedBpm != null;
+
+  const SNAP_LABELS: Record<SnapResolution, string> = {
+    'bar': 'Bar',
+    'beat': 'Beat',
+    '1/2-beat': '1/2',
+    '1/4-beat': '1/4',
+  };
 
   return (
     <div className="w-64 border-r border-border bg-sidebar text-sidebar-foreground flex flex-col h-full shrink-0">
@@ -163,43 +173,82 @@ export function LeftSidebar() {
       </div>
 
       {/* Tool mode */}
-      <div className="p-2 border-b border-border flex justify-center gap-1 bg-black/10">
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => setToolMode('select')}
-          className={`w-7 h-7 rounded-none ${toolMode === 'select' ? 'text-primary shadow-[0_2px_8px_hsl(var(--primary)/0.4)]' : 'text-muted-foreground hover:text-foreground hover:bg-white/5'}`}
-          title="Select (V)"
-        >
-          <MousePointer2 className="w-3.5 h-3.5" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => setToolMode('slip')}
-          className={`w-7 h-7 rounded-none ${toolMode === 'slip' ? 'text-primary shadow-[0_2px_8px_hsl(var(--primary)/0.4)]' : 'text-muted-foreground hover:text-foreground hover:bg-white/5'}`}
-          title="Slip (S)"
-        >
-          <Hand className="w-3.5 h-3.5" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => setToolMode('split')}
-          className={`w-7 h-7 rounded-none ${toolMode === 'split' ? 'text-primary shadow-[0_2px_8px_hsl(var(--primary)/0.4)]' : 'text-muted-foreground hover:text-foreground hover:bg-white/5'}`}
-          title="Split (X)"
-        >
-          <Scissors className="w-3.5 h-3.5" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => setToolMode('warp')}
-          className={`w-7 h-7 rounded-none ${toolMode === 'warp' ? 'text-primary shadow-[0_2px_8px_hsl(var(--primary)/0.4)]' : 'text-muted-foreground hover:text-foreground hover:bg-white/5'}`}
-          title="Warp (W)"
-        >
-          <Activity className="w-3.5 h-3.5" />
-        </Button>
+      <div className="px-2 pt-2 pb-1 border-b border-border bg-black/10">
+        <div className="flex justify-center gap-1 mb-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setToolMode('select')}
+            className={`w-7 h-7 rounded-none ${toolMode === 'select' ? 'text-primary shadow-[0_2px_8px_hsl(var(--primary)/0.4)]' : 'text-muted-foreground hover:text-foreground hover:bg-white/5'}`}
+            title="Select (V)"
+          >
+            <MousePointer2 className="w-3.5 h-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setToolMode('slip')}
+            className={`w-7 h-7 rounded-none ${toolMode === 'slip' ? 'text-primary shadow-[0_2px_8px_hsl(var(--primary)/0.4)]' : 'text-muted-foreground hover:text-foreground hover:bg-white/5'}`}
+            title="Slip (S)"
+          >
+            <Hand className="w-3.5 h-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setToolMode('split')}
+            className={`w-7 h-7 rounded-none ${toolMode === 'split' ? 'text-primary shadow-[0_2px_8px_hsl(var(--primary)/0.4)]' : 'text-muted-foreground hover:text-foreground hover:bg-white/5'}`}
+            title="Split (X)"
+          >
+            <Scissors className="w-3.5 h-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setToolMode('warp')}
+            className={`w-7 h-7 rounded-none ${toolMode === 'warp' ? 'text-primary shadow-[0_2px_8px_hsl(var(--primary)/0.4)]' : 'text-muted-foreground hover:text-foreground hover:bg-white/5'}`}
+            title="Warp (W)"
+          >
+            <Activity className="w-3.5 h-3.5" />
+          </Button>
+        </div>
+
+        {/* Snap controls */}
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => setSnapEnabled(!snapEnabled)}
+            title={snapEnabled ? 'Snap ON — click to disable (Shift inverts during drag)' : 'Snap OFF — click to enable'}
+            className={`flex items-center gap-1 h-6 px-2 border text-[9px] uppercase tracking-[0.1em] font-medium transition-colors shrink-0 ${
+              snapEnabled
+                ? 'border-primary/60 text-primary bg-primary/8 shadow-[0_0_6px_hsl(var(--primary)/0.2)]'
+                : 'border-border text-muted-foreground hover:border-primary/40 hover:text-foreground'
+            }`}
+          >
+            <Magnet className="w-3 h-3" />
+            SNAP
+          </button>
+          <Select
+            value={snapResolution}
+            onValueChange={(v) => setSnapResolution(v as SnapResolution)}
+          >
+            <SelectTrigger
+              className={`h-6 flex-1 bg-transparent rounded-none text-[9px] uppercase tracking-[0.08em] focus:ring-0 transition-colors ${
+                snapEnabled
+                  ? 'border-primary/30 text-primary hover:border-primary/60'
+                  : 'border-border text-muted-foreground hover:border-primary/30'
+              }`}
+            >
+              <SelectValue>{SNAP_LABELS[snapResolution]}</SelectValue>
+            </SelectTrigger>
+            <SelectContent className="rounded-none border-border">
+              <SelectItem value="bar" className="text-xs uppercase tracking-[0.08em] rounded-none">Bar</SelectItem>
+              <SelectItem value="beat" className="text-xs uppercase tracking-[0.08em] rounded-none">Beat</SelectItem>
+              <SelectItem value="1/2-beat" className="text-xs uppercase tracking-[0.08em] rounded-none">½ Beat</SelectItem>
+              <SelectItem value="1/4-beat" className="text-xs uppercase tracking-[0.08em] rounded-none">¼ Beat</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <p className="text-[7px] text-muted-foreground/30 mt-1 tracking-wide">Shift inverts snap during drag</p>
       </div>
 
       {/* Track list */}

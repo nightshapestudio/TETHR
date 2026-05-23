@@ -1,6 +1,7 @@
 import React, { useRef, useCallback } from 'react';
 import { Clip } from '../types/audio';
 import { useProjectStore } from '../store/useProjectStore';
+import { snapPosition } from '../lib/snapUtils';
 
 interface ClipBlockProps {
   clip: Clip;
@@ -16,17 +17,14 @@ type DragMode = 'move' | 'trim-left' | 'trim-right';
 const MIN_CLIP_DURATION = 0.05;
 const HANDLE_WIDTH = 8;
 
-function snapToGrid(pos: number, bpm: number, snap: boolean): number {
-  if (!snap || bpm <= 0) return pos;
-  const beatDuration = 60 / bpm;
-  return Math.round(pos / beatDuration) * beatDuration;
-}
-
 export function ClipBlock({ clip, isSelected, pixelsPerSecond, scrollOffset, height, onClick }: ClipBlockProps) {
   const updateArrangementClip = useProjectStore(s => s.updateArrangementClip);
   const splitArrangementClip = useProjectStore(s => s.splitArrangementClip);
+  const setSnapGuidePosition = useProjectStore(s => s.setSnapGuidePosition);
   const toolMode = useProjectStore(s => s.toolMode);
   const bpm = useProjectStore(s => s.bpm);
+  const snapEnabled = useProjectStore(s => s.snapEnabled);
+  const snapResolution = useProjectStore(s => s.snapResolution);
   const track = useProjectStore(s => s.tracks.find(t => t.id === clip.trackId));
 
   const dragStart = useRef<{
@@ -35,7 +33,6 @@ export function ClipBlock({ clip, isSelected, pixelsPerSecond, scrollOffset, hei
     sourceStart: number;
     sourceDuration: number;
     mode: DragMode;
-    shiftHeld: boolean;
   } | null>(null);
 
   const x = (clip.timelinePosition - scrollOffset) * pixelsPerSecond;
@@ -69,7 +66,6 @@ export function ClipBlock({ clip, isSelected, pixelsPerSecond, scrollOffset, hei
       sourceStart: clip.sourceStart,
       sourceDuration: clip.sourceDuration,
       mode,
-      shiftHeld: e.shiftKey,
     };
     e.currentTarget.setPointerCapture(e.pointerId);
   }, [clip.id, clip.sourceDuration, clip.sourceStart, clip.timelinePosition, onClick, pixelsPerSecond, splitArrangementClip, toolMode]);
@@ -81,13 +77,14 @@ export function ClipBlock({ clip, isSelected, pixelsPerSecond, scrollOffset, hei
     const deltaX = e.clientX - dragStart.current.mouseX;
     const deltaSec = deltaX / pixelsPerSecond;
     const trackDuration = track?.duration ?? Number.POSITIVE_INFINITY;
-    // Shift key snaps to beat grid
-    const doSnap = e.shiftKey;
+    const shiftHeld = e.shiftKey;
 
     if (dragStart.current.mode === 'move') {
       const rawPosition = Math.max(0, dragStart.current.clipPosition + deltaSec);
-      const newPosition = snapToGrid(rawPosition, bpm, doSnap);
+      const newPosition = snapPosition(rawPosition, bpm, snapEnabled, snapResolution, shiftHeld);
       updateArrangementClip(clip.id, { timelinePosition: newPosition });
+      // Emit snap guide so Timeline can draw the cyan guide line
+      setSnapGuidePosition(newPosition);
       return;
     }
 
@@ -97,7 +94,7 @@ export function ClipBlock({ clip, isSelected, pixelsPerSecond, scrollOffset, hei
       const newSourceStart = Math.max(0, dragStart.current.sourceStart + trimAmount);
       const newDuration = Math.max(MIN_CLIP_DURATION, dragStart.current.sourceDuration - trimAmount);
       const rawPosition = Math.max(0, dragStart.current.clipPosition + trimAmount);
-      const newTimelinePosition = snapToGrid(rawPosition, bpm, doSnap);
+      const newTimelinePosition = snapPosition(rawPosition, bpm, snapEnabled, snapResolution, shiftHeld);
       updateArrangementClip(clip.id, {
         sourceStart: newSourceStart,
         sourceDuration: newDuration,
@@ -108,23 +105,25 @@ export function ClipBlock({ clip, isSelected, pixelsPerSecond, scrollOffset, hei
       return;
     }
 
+    // trim-right: snap the clip's right edge
+    const rawEnd = dragStart.current.clipPosition + dragStart.current.sourceDuration + deltaSec;
+    const snappedEnd = snapPosition(rawEnd, bpm, snapEnabled, snapResolution, shiftHeld);
+    const snappedDuration = snappedEnd - dragStart.current.clipPosition;
     const maxRightDuration = Math.max(MIN_CLIP_DURATION, trackDuration - dragStart.current.sourceStart);
-    const newDuration = Math.max(
-      MIN_CLIP_DURATION,
-      Math.min(maxRightDuration, dragStart.current.sourceDuration + deltaSec)
-    );
+    const newDuration = Math.max(MIN_CLIP_DURATION, Math.min(maxRightDuration, snappedDuration));
     updateArrangementClip(clip.id, {
       sourceDuration: newDuration,
       fadeIn: Math.min(clip.fadeIn, newDuration),
       fadeOut: Math.min(clip.fadeOut, newDuration),
     });
-  }, [bpm, clip.fadeIn, clip.fadeOut, clip.id, pixelsPerSecond, track?.duration, updateArrangementClip]);
+  }, [bpm, clip.fadeIn, clip.fadeOut, clip.id, pixelsPerSecond, snapEnabled, snapResolution, setSnapGuidePosition, track?.duration, updateArrangementClip]);
 
   const handlePointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     e.stopPropagation();
     dragStart.current = null;
+    setSnapGuidePosition(null);
     try { e.currentTarget.releasePointerCapture(e.pointerId); } catch (_) {}
-  }, []);
+  }, [setSnapGuidePosition]);
 
   // All hooks are above — safe to early-return now
   const containerWidth = typeof window !== 'undefined' ? window.innerWidth : 1280;
