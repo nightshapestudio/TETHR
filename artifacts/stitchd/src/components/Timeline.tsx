@@ -279,21 +279,130 @@ export function Timeline() {
 
       <div ref={scrollContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden relative">
         {tracks.length === 0 ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-5">
-            {/* DRUMKIT-style corner-bracket drop zone */}
-            <div className="relative w-24 h-16">
-              <div className="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2" style={{ borderColor: 'hsl(176 82% 48% / 0.55)' }} />
-              <div className="absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2" style={{ borderColor: 'hsl(176 82% 48% / 0.55)' }} />
-              <div className="absolute bottom-0 left-0 w-4 h-4 border-b-2 border-l-2" style={{ borderColor: 'hsl(176 82% 48% / 0.55)' }} />
-              <div className="absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2" style={{ borderColor: 'hsl(176 82% 48% / 0.55)' }} />
-              <div className="absolute inset-0 flex items-center justify-center">
-                <span className="text-xl font-thin" style={{ color: 'hsl(176 82% 48% / 0.35)' }}>+</span>
+          <div className="absolute inset-0 flex items-center justify-center overflow-hidden">
+
+            {/* ── Atmospheric depth layer ── */}
+            <div className="absolute inset-0 pointer-events-none" style={{
+              background: [
+                'radial-gradient(ellipse 60% 50% at 50% 50%, hsl(258 65% 22% / 0.18) 0%, transparent 70%)',
+                'radial-gradient(ellipse 30% 30% at 50% 50%, hsl(176 82% 46% / 0.04) 0%, transparent 60%)',
+              ].join(', '),
+            }} />
+
+            {/* ── Ghost scan lines ── */}
+            <div className="absolute inset-0 pointer-events-none" style={{
+              backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 28px, hsl(258 40% 60% / 0.025) 28px, hsl(258 40% 60% / 0.025) 29px)',
+            }} />
+
+            {/* ── Main reconstruction chamber ── */}
+            <div className="relative" style={{ width: 'min(580px, 82%)', height: 'min(320px, 62%)' }}>
+
+              {/* Ghost perimeter — very faint */}
+              <div className="absolute inset-0" style={{
+                border: '1px dashed hsl(176 82% 48% / 0.09)',
+              }} />
+
+              {/* Subtle corner glow — one per corner */}
+              {[
+                { top: -1, left: -1 },
+                { top: -1, right: -1 },
+                { bottom: -1, left: -1 },
+                { bottom: -1, right: -1 },
+              ].map((pos, i) => (
+                <div key={i} className="absolute w-12 h-12 pointer-events-none" style={{
+                  ...pos,
+                  background: 'radial-gradient(circle at center, hsl(176 82% 52% / 0.12), transparent 70%)',
+                }} />
+              ))}
+
+              {/* Corner brackets — signal cyan, prominent */}
+              {/* top-left */}
+              <div className="absolute top-0 left-0 w-10 h-10" style={{
+                borderTop: '2px solid hsl(176 82% 50% / 0.70)',
+                borderLeft: '2px solid hsl(176 82% 50% / 0.70)',
+                boxShadow: '-1px -1px 0 0 hsl(176 82% 46% / 0.20)',
+              }} />
+              {/* top-right */}
+              <div className="absolute top-0 right-0 w-10 h-10" style={{
+                borderTop: '2px solid hsl(176 82% 50% / 0.70)',
+                borderRight: '2px solid hsl(176 82% 50% / 0.70)',
+                boxShadow: '1px -1px 0 0 hsl(176 82% 46% / 0.20)',
+              }} />
+              {/* bottom-left */}
+              <div className="absolute bottom-0 left-0 w-10 h-10" style={{
+                borderBottom: '2px solid hsl(176 82% 50% / 0.70)',
+                borderLeft: '2px solid hsl(176 82% 50% / 0.70)',
+                boxShadow: '-1px 1px 0 0 hsl(176 82% 46% / 0.20)',
+              }} />
+              {/* bottom-right */}
+              <div className="absolute bottom-0 right-0 w-10 h-10" style={{
+                borderBottom: '2px solid hsl(176 82% 50% / 0.70)',
+                borderRight: '2px solid hsl(176 82% 50% / 0.70)',
+                boxShadow: '1px 1px 0 0 hsl(176 82% 46% / 0.20)',
+              }} />
+
+              {/* Center content */}
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-5">
+
+                {/* Upload glyph */}
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="16 16 12 12 8 16" stroke="hsl(176 82% 52% / 0.50)" strokeWidth="1.25" />
+                  <line x1="12" y1="12" x2="12" y2="21" stroke="hsl(176 82% 52% / 0.50)" strokeWidth="1.25" />
+                  <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3" stroke="hsl(258 60% 70% / 0.30)" strokeWidth="1" />
+                </svg>
+
+                {/* Primary label */}
+                <div className="text-center space-y-2">
+                  <p style={{
+                    fontSize: '10px',
+                    fontWeight: 600,
+                    letterSpacing: '0.32em',
+                    textTransform: 'uppercase',
+                    color: 'hsl(176 82% 54% / 0.80)',
+                  }}>
+                    DROP AUDIO FILES
+                  </p>
+                  <p style={{
+                    fontSize: '9px',
+                    fontFamily: 'monospace',
+                    letterSpacing: '0.22em',
+                    color: 'hsl(258 40% 65% / 0.38)',
+                  }}>
+                    WAV · MP3 · M4A · AIFF
+                  </p>
+                </div>
+
+                {/* Separator line */}
+                <div style={{
+                  width: 48,
+                  height: 1,
+                  background: 'linear-gradient(90deg, transparent, hsl(258 50% 60% / 0.25), transparent)',
+                }} />
+
+                {/* Footer copy */}
+                <p style={{
+                  fontSize: '8px',
+                  letterSpacing: '0.22em',
+                  textTransform: 'uppercase',
+                  color: 'hsl(258 30% 55% / 0.28)',
+                }}>
+                  or use IMPORT AUDIO in the sidebar
+                </p>
               </div>
             </div>
-            <div className="text-center space-y-1">
-              <p className="text-[9px] uppercase tracking-[0.16em] font-medium" style={{ color: 'hsl(176 82% 52% / 0.70)' }}>DROP AUDIO FILES</p>
-              <p className="text-[9px] text-muted-foreground/40 font-mono tracking-widest">WAV · MP3 · M4A · AIFF</p>
+
+            {/* Engine tag — bottom center, atmospheric */}
+            <div className="absolute bottom-6 left-0 right-0 flex justify-center">
+              <p style={{
+                fontSize: '8px',
+                letterSpacing: '0.28em',
+                textTransform: 'uppercase',
+                color: 'hsl(258 25% 50% / 0.18)',
+              }}>
+                AUDIO RECONSTRUCTION ENGINE
+              </p>
             </div>
+
           </div>
         ) : (
           <div className="relative">
