@@ -71,7 +71,10 @@
     "vaul": "^1.1.2",
     "vite": "catalog:",
     "wouter": "^3.3.5",
-    "zustand": "^5.0.13",
-    "zod": "catalog:"
+    "zod": "catalog:",
+    "zustand": "^5.0.13"
+  },
+  "dependencies": {
+    "@soundtouchjs/audio-worklet": "^2.0.3"
   }
 }

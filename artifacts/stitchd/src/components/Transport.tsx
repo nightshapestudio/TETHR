@@ -5,6 +5,7 @@ import { ZoomIn, ZoomOut } from 'lucide-react';
 import { ExportModal } from './ExportModal';
 import { ProjectModal } from './ProjectModal';
 import { LevelMeter } from './LevelMeter';
+import { BpmDragField } from './BpmDragField';
 
 function formatTime(seconds: number): string {
   const mins = Math.floor(seconds / 60);
@@ -35,6 +36,8 @@ export function Transport() {
     zoomLevel,
     setZoom,
     isLooping,
+    metronomeEnabled,
+    setMetronomeEnabled,
   } = useProjectStore();
 
   const [showExport, setShowExport] = useState(false);
@@ -123,7 +126,33 @@ export function Transport() {
           </button>
 
           <button
-            className="w-6 h-6 flex items-center justify-center hover:bg-white/5 transition-colors ml-2 group"
+            className={`w-8 h-6 flex items-center justify-center border transition-colors group ${
+              metronomeEnabled
+                ? 'border-primary/50 bg-primary/10'
+                : 'border-border hover:bg-white/5 hover:border-primary/30'
+            }`}
+            onClick={() => setMetronomeEnabled(!metronomeEnabled)}
+            title={metronomeEnabled ? 'Metronome on (grid BPM)' : 'Metronome off'}
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.75"
+              strokeLinecap="round"
+              className={metronomeEnabled ? 'text-primary' : 'text-muted-foreground group-hover:text-foreground'}
+              style={metronomeEnabled ? { filter: 'drop-shadow(0 0 4px hsl(176 82% 46% / 0.55))' } : undefined}
+            >
+              <path d="M12 2v4" />
+              <circle cx="12" cy="14" r="8" />
+              <path d="M12 14l3-5" />
+            </svg>
+          </button>
+
+          <button
+            className="w-6 h-6 flex items-center justify-center hover:bg-white/5 transition-colors ml-1 group"
             onClick={() => useProjectStore.setState({ isLooping: !isLooping })}
             title="Loop"
           >
@@ -149,28 +178,21 @@ export function Transport() {
 
         {/* BPM display — clearly labelled, editable inline, shows source state */}
         <div
-          className={`flex flex-col items-center justify-center px-2 py-1 border min-w-[68px] ${
+          className={`flex flex-col items-center justify-center px-2 py-1 border min-w-[72px] h-9 ${
             bpmSource === 'auto'
-              ? 'border-primary/30 bg-primary/5'
-              : 'border-border bg-transparent'
+              ? 'border-[var(--color-signal)]/30 bg-[var(--color-signal)]/5'
+              : 'border-border bg-[#0E1117]'
           }`}
-          title="Project BPM — click to edit"
+          title="Grid BPM — drag to adjust · double-click to type"
         >
-          <span className="text-[8px] uppercase tracking-[0.12em] text-muted-foreground font-medium leading-none mb-0.5">
-            {bpmSource === 'auto' ? '◉ AUTO BPM' : bpmSource === 'tap' ? '♪ TAP BPM' : 'BPM'}
+          <span className="text-[7px] uppercase tracking-[0.12em] text-muted-foreground font-medium leading-none mb-0.5">
+            {bpmSource === 'auto' ? '◉ GRID' : bpmSource === 'tap' ? '♪ TAP' : 'GRID'}
           </span>
-          <input
-            type="number"
+          <BpmDragField
             value={bpm}
-            onChange={(e) => {
-              const v = Number(e.target.value);
-              if (!isNaN(v) && v > 0) setBpm(v, 'manual');
-            }}
-            min={30}
-            max={300}
-            step={0.5}
-            className="w-full bg-transparent font-mono text-primary text-center text-base outline-none leading-none"
-            style={{ textShadow: '0 0 8px hsl(258 72% 68% / 0.5)' }}
+            onChange={(v) => setBpm(v, 'manual')}
+            className="h-5"
+            label=""
           />
         </div>
 

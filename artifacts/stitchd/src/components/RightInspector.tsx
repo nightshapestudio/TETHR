@@ -4,11 +4,12 @@ import { Button } from './ui/button';
 import { Slider } from './ui/slider';
 import { Label } from './ui/label';
 import { Input } from './ui/input';
-import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Info, AlertTriangle, Maximize2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Maximize2 } from 'lucide-react';
 import { CrossfadeEditor } from './CrossfadeEditor';
 import { SeamAuditionButton } from './SeamAuditionButton';
 import { SECTION_LABELS } from '../lib/sectionLabels';
 import { SectionLabel } from '../types/audio';
+import { conformTempoRatio, stretchedTimelineDuration } from '../lib/timeStretch';
 
 export function RightInspector() {
   const { 
@@ -21,20 +22,24 @@ export function RightInspector() {
 
   const [fitTargetDuration, setFitTargetDuration] = useState('');
 
-  const clip = arrangementClips.find(c => c.id === selectedClipId);
-  const track = clip ? tracks.find(t => t.id === clip.trackId) : null;
+  const clip = selectedClipId
+    ? arrangementClips.find(c => c.id === selectedClipId)
+    : undefined;
+  const track = clip ? tracks.find(t => t.id === clip.trackId) : undefined;
 
-  if (!clip || !track) {
-    return (
-      <div className="w-64 border-l border-border bg-sidebar text-sidebar-foreground flex flex-col h-full shrink-0 p-6 items-center justify-center text-center">
-        <Info className="w-8 h-8 text-muted-foreground mb-4 opacity-30" />
-        <h3 className="text-[10px] uppercase tracking-[0.12em] font-medium text-muted-foreground mb-2">NO CLIP SELECTED</h3>
-      </div>
-    );
-  }
+  // Collapsed when no arrangement clip is selected (track focus lives in the left sidebar)
+  if (!clip || !track) return null;
 
   const secondsPerBar = (60 / bpm) * 4;
-  const outputDuration = clip ? clip.sourceDuration / Math.max(0.05, clip.stretchRatio) : 0;
+  const outputDuration = stretchedTimelineDuration(clip.sourceDuration, clip.stretchRatio || 1);
+
+  const handleConformToGrid = () => {
+    if (!track.estimatedBpm) return;
+    updateArrangementClip(clip.id, {
+      stretchRatio: conformTempoRatio(track.estimatedBpm, bpm),
+      conformToProjectBpm: true,
+    });
+  };
 
   const handleNudge = (amount: number) => {
     updateArrangementClip(clip.id, { nudgeOffset: clip.nudgeOffset + amount });
@@ -198,24 +203,38 @@ export function RightInspector() {
           
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <Label className="text-[9px] uppercase tracking-[0.08em] text-muted-foreground flex items-center gap-1">
-                <span>TIME STRETCH</span>
-                <span className="font-mono text-primary ml-auto">{clip.stretchRatio.toFixed(2)}x</span>
+              <Label className="text-[9px] uppercase tracking-[0.08em] text-muted-foreground">
+                TEMPO CONFORM
               </Label>
+              <span className="font-mono text-[var(--color-signal)] text-xs">{clip.stretchRatio.toFixed(2)}x</span>
             </div>
-            <Slider 
-              value={[clip.stretchRatio]} 
-              min={0.5}
-              max={2}
+            <Slider
+              value={[clip.stretchRatio]}
+              min={0.25}
+              max={4}
               step={0.01}
-              onValueChange={([v]) => updateArrangementClip(clip.id, { stretchRatio: v })}
+              onValueChange={([v]) => {
+                if (v === undefined) return;
+                updateArrangementClip(clip.id, { stretchRatio: v, conformToProjectBpm: false });
+              }}
             />
-            <div className="flex items-center gap-1 pt-0.5">
-              <AlertTriangle className="w-2.5 h-2.5 text-amber-400/70 shrink-0" />
-              <span className="text-[8px] uppercase tracking-[0.08em] text-amber-400/70 font-medium">
-                DRAFT — changes pitch
+            <div className="flex items-center justify-between gap-2 pt-0.5">
+              <span className="text-[8px] uppercase tracking-[0.08em] text-muted-foreground/70">
+                Pitch preserved · SoundTouch
               </span>
+              {track.estimatedBpm && (
+                <button
+                  type="button"
+                  onClick={handleConformToGrid}
+                  className="text-[8px] uppercase tracking-[0.08em] text-[var(--color-signal)]/70 hover:text-[var(--color-signal)] border border-[var(--color-signal)]/25 px-1.5 py-0.5"
+                >
+                  Match grid
+                </button>
+              )}
             </div>
+            {clip.conformToProjectBpm && (
+              <span className="text-[7px] uppercase tracking-[0.1em] text-primary/50">Linked to grid BPM</span>
+            )}
           </div>
 
           {/* Fit Clip to Section */}

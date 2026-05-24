@@ -1,5 +1,15 @@
 import { create } from 'zustand';
 import { AudioTrack, Clip, PlaybackState, SegmentMode, ToolMode, BpmSource, SnapResolution } from '../types/audio';
+import { conformTempoRatio, clearStretchCacheForTrack } from '../lib/timeStretch';
+
+function reconformClipsToGrid(clips: Clip[], tracks: AudioTrack[], projectBpm: number): Clip[] {
+  return clips.map(c => {
+    if (c.conformToProjectBpm === false) return c;
+    const track = tracks.find(t => t.id === c.trackId);
+    if (!track?.estimatedBpm) return c;
+    return { ...c, stretchRatio: conformTempoRatio(track.estimatedBpm, projectBpm) };
+  });
+}
 
 // ---------------------------------------------------------------------------
 // BPM detection — energy autocorrelation, runs inline after decode
@@ -86,7 +96,7 @@ function estimateBPM(audioBuffer: AudioBuffer): { bpm: number | null; confidence
     const bpm = Math.round(rawBpm * 2) / 2;
 
     // Reject low-confidence or out-of-range results
-    if (confidence < 0.08 || bpm < 50 || bpm > 220) {
+    if (confidence < 0.06 || bpm < 50 || bpm > 220) {
       return { bpm: null, confidence };
     }
 
@@ -119,6 +129,7 @@ interface ProjectState {
   snapEnabled: boolean;
   snapResolution: SnapResolution;
   snapGuidePosition: number | null;
+  metronomeEnabled: boolean;
 
   importTrack: (file: File) => Promise<void>;
   removeTrack: (id: string) => void;
@@ -142,6 +153,7 @@ interface ProjectState {
   setSnapEnabled: (v: boolean) => void;
   setSnapResolution: (r: SnapResolution) => void;
   setSnapGuidePosition: (pos: number | null) => void;
+  setMetronomeEnabled: (enabled: boolean) => void;
   triggerPlay: (fromPosition?: number) => void;
   saveProject: () => void;
   loadProject: (json: string) => void;
@@ -153,11 +165,11 @@ const PAST_STATES: any[] = [];
 const FUTURE_STATES: any[] = [];
 
 const COLORS = [
-  'hsl(258 65% 65%)',   // periwinkle
-  'hsl(280 55% 62%)',   // violet
-  'hsl(302 45% 58%)',   // muted fuchsia
-  'hsl(340 60% 55%)',   // deep rose
-  'hsl(222 48% 58%)',   // blue-violet
+  'hsl(186 90% 62% / 0.85)',  // signal cyan — accent track
+  'hsl(232 85% 72% / 0.80)',  // periwinkle midpoint
+  'hsl(255 75% 68% / 0.75)',  // deep violet
+  'hsl(271 70% 70% / 0.70)',  // cool magenta-violet
+  'hsl(220 35% 58% / 0.65)',  // neutral lane
 ];
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
@@ -180,6 +192,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   snapEnabled: true,
   snapResolution: 'bar' as SnapResolution,
   snapGuidePosition: null,
+  metronomeEnabled: false,
 
   importTrack: async (file: File) => {
     // Decode using a temporary AudioContext — closed immediately after
@@ -247,46 +260,29 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
     set((state) => {
       PAST_STATES.push(state);
-      // First track becomes reference and auto-sets project BPM if detection succeeded
-      const shouldUpdateBpm =
-        isFirstTrack && detectedBpm !== null && state.bpmSource !== 'manual';
-      // Also update if current bpm source is auto (user hasn't manually overridden)
-      const shouldUpdateBpmAuto =
-        isFirstTrack && detectedBpm !== null;
+      // First import: apply detected tempo to project grid only (per-track estimatedBpm stays separate)
+      const applyDetectedToGrid = isFirstTrack && detectedBpm !== null;
       return {
         tracks: [...state.tracks, newTrack],
-        bpm: shouldUpdateBpmAuto ? detectedBpm : state.bpm,
-        bpmSource: shouldUpdateBpmAuto ? 'auto' : state.bpmSource,
+        bpm: applyDetectedToGrid ? detectedBpm : state.bpm,
+        bpmSource: applyDetectedToGrid ? 'auto' : state.bpmSource,
       };
     });
   },
 
   removeTrack: (id: string) => set((state) => {
     PAST_STATES.push(state);
+    clearStretchCacheForTrack(id);
     return {
       tracks: state.tracks.filter(t => t.id !== id),
       arrangementClips: state.arrangementClips.filter(c => c.trackId !== id),
     };
   }),
 
-  setReferenceTrack: (id: string) => set((state) => {
-    const track = state.tracks.find(t => t.id === id);
-    // Update project BPM from this track's detected BPM, unless user manually overrode
-    const newBpm =
-      track?.estimatedBpm !== null && track?.estimatedBpm !== undefined && state.bpmSource !== 'manual'
-        ? track.estimatedBpm
-        : state.bpm;
-    const newSource =
-      track?.estimatedBpm !== null && track?.estimatedBpm !== undefined && state.bpmSource !== 'manual'
-        ? 'auto' as BpmSource
-        : state.bpmSource;
-
-    return {
-      tracks: state.tracks.map(t => ({ ...t, isReference: t.id === id })),
-      bpm: newBpm,
-      bpmSource: newSource,
-    };
-  }),
+  setReferenceTrack: (id: string) => set((state) => ({
+    // Master = default source-playback target only; grid BPM is set via PROJECT BPM or track USE
+    tracks: state.tracks.map(t => ({ ...t, isReference: t.id === id })),
+  })),
 
   updateTrack: (id: string, updates: Partial<AudioTrack>) => set((state) => ({
     tracks: state.tracks.map(t => t.id === id ? { ...t, ...updates } : t),
@@ -364,7 +360,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   selectClip: (id: string | null) => set({ selectedClipId: id }),
   selectTrack: (id: string | null) => set({ selectedTrackId: id }),
 
-  setBpm: (bpm: number, source: BpmSource = 'manual') => set({ bpm, bpmSource: source }),
+  setBpm: (bpm: number, source: BpmSource = 'manual') => set((state) => ({
+    bpm,
+    bpmSource: source,
+    arrangementClips: reconformClipsToGrid(state.arrangementClips, state.tracks, bpm),
+  })),
 
   setSegmentMode: (mode: SegmentMode) => set({ segmentMode: mode }),
   setZoom: (level: number) => set({ zoomLevel: Math.max(0.1, Math.min(20, level)) }),
@@ -376,6 +376,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   setSnapEnabled: (v: boolean) => set({ snapEnabled: v }),
   setSnapResolution: (r: SnapResolution) => set({ snapResolution: r }),
   setSnapGuidePosition: (pos: number | null) => set({ snapGuidePosition: pos }),
+  setMetronomeEnabled: (enabled: boolean) => set({ metronomeEnabled: enabled }),
 
   triggerPlay: (fromPosition?: number) => set((state) => {
     const pos = fromPosition ?? state.playheadPosition;

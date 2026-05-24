@@ -4,6 +4,8 @@ import { WaveformCanvas } from './WaveformCanvas';
 import { BeatGrid } from './BeatGrid';
 import { ArrangementLane } from './ArrangementLane';
 import { snapForward } from '../lib/snapUtils';
+import { conformTempoRatio, stretchedTimelineDuration } from '../lib/timeStretch';
+import { AtmosphericPanel } from './AtmosphericPanel';
 
 export function Timeline() {
   const {
@@ -54,7 +56,8 @@ export function Timeline() {
 
   const maxTrackDuration = tracks.length > 0 ? Math.max(...tracks.map(t => t.duration)) : 0;
   const maxArrangementEnd = arrangementClips.length > 0
-    ? Math.max(...arrangementClips.map(c => c.timelinePosition + c.sourceDuration))
+    ? Math.max(...arrangementClips.map(c =>
+        c.timelinePosition + stretchedTimelineDuration(c.sourceDuration, c.stretchRatio || 1)))
     : 0;
   const totalDuration = Math.max(maxTrackDuration, maxArrangementEnd, 60);
 
@@ -185,6 +188,11 @@ export function Timeline() {
             } else {
               // APPEND MODE — add new clip at end of arrangement, snapped to grid
               const insertPos = getInsertPosition();
+              const { tracks: allTracks, bpm: gridBpm } = useProjectStore.getState();
+              const srcTrack = allTracks.find(t => t.id === trackId);
+              const initialStretch = srcTrack?.estimatedBpm
+                ? conformTempoRatio(srcTrack.estimatedBpm, gridBpm)
+                : 1;
               addArrangementClip({
                 id: crypto.randomUUID(),
                 trackId,
@@ -199,7 +207,8 @@ export function Timeline() {
                 gain: 1.0,
                 label: `${trackName} – Seg ${i + 1}`,
                 color,
-                stretchRatio: 1.0,
+                stretchRatio: initialStretch,
+                conformToProjectBpm: true,
               });
             }
           }}
@@ -248,7 +257,12 @@ export function Timeline() {
   };
 
   const playheadX = 100 + (playheadPosition - scrollPosition) * pixelsPerSecond;
-  const playheadVisible = playheadX >= 100 && playheadX <= containerWidth + 100;
+  const playheadInView = playheadX >= 100 && playheadX <= containerWidth + 100;
+  const hasTimelineContent = tracks.length > 0;
+  const showPlayhead =
+    hasTimelineContent &&
+    playheadInView &&
+    (playbackState !== 'stopped' || playheadPosition > 0);
 
   // Snap guide X position in pixels (null when not dragging)
   const snapGuideX = snapGuidePosition !== null
@@ -281,18 +295,7 @@ export function Timeline() {
         {tracks.length === 0 ? (
           <div className="absolute inset-0 flex items-center justify-center overflow-hidden">
 
-            {/* ── Atmospheric depth layer ── */}
-            <div className="absolute inset-0 pointer-events-none" style={{
-              background: [
-                'radial-gradient(ellipse 60% 50% at 50% 50%, hsl(258 65% 22% / 0.18) 0%, transparent 70%)',
-                'radial-gradient(ellipse 30% 30% at 50% 50%, hsl(176 82% 46% / 0.04) 0%, transparent 60%)',
-              ].join(', '),
-            }} />
-
-            {/* ── Ghost scan lines ── */}
-            <div className="absolute inset-0 pointer-events-none" style={{
-              backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 28px, hsl(258 40% 60% / 0.025) 28px, hsl(258 40% 60% / 0.025) 29px)',
-            }} />
+            <AtmosphericPanel />
 
             {/* ── Main reconstruction chamber ── */}
             <div className="relative" style={{ width: 'min(580px, 82%)', height: 'min(320px, 62%)' }}>
@@ -408,6 +411,7 @@ export function Timeline() {
           <div className="relative">
             <div className="absolute top-0 bottom-0 pointer-events-none z-0" style={{ left: 100, right: 0 }}>
               <BeatGrid
+                key={`beat-grid-${bpm}`}
                 width={containerWidth - 100}
                 height={tracks.length * 80 + 120}
                 bpm={bpm}
@@ -496,8 +500,8 @@ export function Timeline() {
         )}
       </div>
 
-      {/* Playhead — spans full height including ruler */}
-      {playheadVisible && (
+      {/* Playhead — hidden in empty drop zone and before any timeline content / playback */}
+      {showPlayhead && (
         <div
           className="absolute top-0 bottom-0 pointer-events-none z-50"
           style={{ left: playheadX, width: 1, backgroundColor: 'hsl(176 82% 52%)', opacity: 0.9, boxShadow: '0 0 6px hsl(176 82% 46% / 0.55)' }}

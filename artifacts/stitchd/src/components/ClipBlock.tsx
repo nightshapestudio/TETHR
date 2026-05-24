@@ -2,6 +2,7 @@ import React, { useRef, useCallback } from 'react';
 import { Clip } from '../types/audio';
 import { useProjectStore } from '../store/useProjectStore';
 import { snapPosition } from '../lib/snapUtils';
+import { stretchedTimelineDuration } from '../lib/timeStretch';
 import { getSectionShort } from '../lib/sectionLabels';
 
 interface ClipBlockProps {
@@ -37,7 +38,7 @@ export function ClipBlock({ clip, isSelected, pixelsPerSecond, scrollOffset, hei
   } | null>(null);
 
   const x = (clip.timelinePosition - scrollOffset) * pixelsPerSecond;
-  const w = Math.max(4, clip.sourceDuration * pixelsPerSecond);
+  const w = Math.max(4, stretchedTimelineDuration(clip.sourceDuration, clip.stretchRatio || 1) * pixelsPerSecond);
 
   const getLocalOffset = (clientX: number, currentTarget: HTMLDivElement) => {
     const rect = currentTarget.getBoundingClientRect();

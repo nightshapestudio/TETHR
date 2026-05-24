@@ -38,6 +38,9 @@
   --color-destructive: hsl(var(--destructive));
   --color-destructive-foreground: hsl(var(--destructive-foreground));
 
+  --color-signal: hsl(var(--signal));
+  --color-signal-dim: hsl(var(--signal-dim));
+
   --color-chart-1: hsl(var(--chart-1));
   --color-chart-2: hsl(var(--chart-2));
   --color-chart-3: hsl(var(--chart-3));
@@ -64,61 +67,57 @@
 }
 
 :root, .dark {
-  /* ── Matte black foundation ── */
-  --background: 0 0% 4%;
-  --foreground: 210 8% 86%;
+  /* Palette anchors — #07090D base, spectral hierarchy */
+  --background: 220 27% 4%;       /* #07090D */
+  --foreground: 228 100% 95%;     /* #E6ECFF bright */
 
-  --card: 0 0% 6%;
-  --card-foreground: 210 6% 82%;
-  --card-border: 0 0% 11%;
+  --card: 220 24% 7%;             /* #0E1117 panel */
+  --card-foreground: 228 80% 92%;
+  --card-border: 220 18% 12%;
 
-  --border: 0 0% 10%;
-  --input: 0 0% 8%;
-  --ring: 258 72% 68%;
+  --border: 220 16% 14%;
+  --input: 220 22% 8%;
+  --ring: 186 100% 68%;           /* cyan focus */
 
-  /* ── Purple / periwinkle identity ── */
-  --primary: 258 72% 68%;
-  --primary-foreground: 210 5% 5%;
-  --primary-border: hsl(258 60% 50%);
+  --primary: 232 100% 74%;        /* #7C8CFF periwinkle — connective */
+  --primary-foreground: 220 27% 6%;
+  --primary-border: hsl(232 70% 58%);
 
-  --secondary: 0 0% 10%;
-  --secondary-foreground: 210 5% 60%;
-  --secondary-border: hsl(0 0% 15%);
+  --secondary: 220 20% 10%;
+  --secondary-foreground: 220 19% 65%; /* #94A0B8 muted */
+  --secondary-border: hsl(220 16% 18%);
 
-  --muted: 0 0% 8%;
-  --muted-foreground: 210 5% 40%;
+  --muted: 220 22% 8%;            /* #131823 elevated */
+  --muted-foreground: 220 19% 65%;
 
-  --accent: 258 72% 68%;
-  --accent-foreground: 210 5% 5%;
-  --accent-border: hsl(258 60% 50%);
+  --accent: 255 100% 71%;         /* #6B4DFF violet — selective */
+  --accent-foreground: 228 100% 96%;
+  --accent-border: hsl(255 70% 58%);
 
   --destructive: 4 75% 50%;
-  --destructive-foreground: 210 5% 92%;
+  --destructive-foreground: 228 80% 95%;
 
-  --popover: 0 0% 7%;
-  --popover-foreground: 210 6% 83%;
-  --popover-border: 0 0% 13%;
+  --popover: 220 24% 7%;
+  --popover-foreground: 228 80% 92%;
+  --popover-border: 220 16% 14%;
 
-  /* ── Matte black sidebars ── */
-  --sidebar: 0 0% 5%;
-  --sidebar-foreground: 210 5% 74%;
-  --sidebar-border: 0 0% 9%;
-  --sidebar-primary: 258 72% 68%;
-  --sidebar-primary-foreground: 210 5% 5%;
-  --sidebar-accent: 0 0% 8%;
-  --sidebar-accent-foreground: 210 4% 54%;
-  --sidebar-ring: 258 72% 68%;
+  --sidebar: 220 26% 5%;
+  --sidebar-foreground: 220 19% 72%;
+  --sidebar-border: 220 16% 11%;
+  --sidebar-primary: 232 100% 74%;
+  --sidebar-primary-foreground: 220 27% 6%;
+  --sidebar-accent: 220 22% 9%;
+  --sidebar-accent-foreground: 220 19% 58%;
+  --sidebar-ring: 186 100% 68%;
 
-  /* ── Chart palette — purple/violet tones ── */
-  --chart-1: 258 72% 65%;
-  --chart-2: 280 58% 60%;
-  --chart-3: 300 48% 56%;
-  --chart-4: 340 62% 52%;
-  --chart-5: 220 52% 56%;
+  --signal: 186 100% 68%;         /* #5DE1FF — active/transport only */
+  --signal-dim: 186 70% 45%;
 
-  /* ── Signal color — CYAN ONLY for snap, playhead, transport activity ── */
-  --signal: hsl(176 82% 46%);
-  --signal-dim: hsl(176 70% 32% / 0.7);
+  --chart-1: 186 90% 62%;
+  --chart-2: 232 85% 72%;
+  --chart-3: 255 75% 68%;
+  --chart-4: 271 70% 70%;
+  --chart-5: 220 35% 58%;
 
   --app-font-sans: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   --app-font-serif: Georgia, serif;
@@ -137,7 +136,6 @@
     -moz-osx-font-smoothing: grayscale;
   }
 
-  /* ── Film grain overlay ── */
   body::after {
     content: '';
     position: fixed;
@@ -146,38 +144,48 @@
     height: 200%;
     z-index: 9999;
     pointer-events: none;
-    opacity: 0.030;
+    opacity: 0.028;
     mix-blend-mode: overlay;
-    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.80' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E");
-    background-size: 200px 200px;
-    animation: grain 0.4s steps(1) infinite;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E");
+    background-size: 180px 180px;
+    animation: grain 0.45s steps(1) infinite;
   }
 
-  /* ── Atmospheric vignette ── */
   body::before {
     content: '';
     position: fixed;
     inset: 0;
     z-index: 9998;
     pointer-events: none;
-    background: radial-gradient(ellipse at 50% 50%, transparent 52%, rgba(0, 0, 0, 0.45) 100%);
+    background:
+      radial-gradient(ellipse 80% 60% at 50% 40%, transparent 45%, rgba(0, 0, 0, 0.35) 100%),
+      radial-gradient(ellipse 120% 80% at 50% 100%, rgba(0, 0, 0, 0.55) 0%, transparent 55%);
   }
 
   @keyframes grain {
     0%   { transform: translate(0, 0); }
-    20%  { transform: translate(-3%, -2%); }
-    40%  { transform: translate(2%, 3%); }
-    60%  { transform: translate(-2%, 1%); }
-    80%  { transform: translate(3%, -1%); }
+    20%  { transform: translate(-2%, -1%); }
+    40%  { transform: translate(1%, 2%); }
+    60%  { transform: translate(-1%, 1%); }
+    80%  { transform: translate(2%, -1%); }
     100% { transform: translate(0, 0); }
   }
 
   ::-webkit-scrollbar { width: 3px; height: 3px; }
   ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: hsl(0 0% 18%); border-radius: 2px; }
-  ::-webkit-scrollbar-thumb:hover { background: hsl(0 0% 26%); }
+  ::-webkit-scrollbar-thumb { background: hsl(220 16% 22%); border-radius: 2px; }
+  ::-webkit-scrollbar-thumb:hover { background: hsl(220 16% 30%); }
 
-  ::selection { background: hsl(258 72% 68% / 0.20); }
+  ::selection { background: hsl(186 100% 68% / 0.18); }
+
+  input[type='number']::-webkit-inner-spin-button,
+  input[type='number']::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type='number'] {
+    -moz-appearance: textfield;
+  }
 }
 
 @layer utilities {

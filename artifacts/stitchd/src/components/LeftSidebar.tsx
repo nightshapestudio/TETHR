@@ -4,6 +4,7 @@ import { Button } from './ui/button';
 import { Slider } from './ui/slider';
 import { Volume2, VolumeX, Trash2, Activity, Scissors, Hand, MousePointer2, RotateCcw, Magnet } from 'lucide-react';
 import { SegmentMode, BpmSource, SnapResolution } from '../types/audio';
+import { BpmDragField } from './BpmDragField';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 
 function formatConfidence(c: number): string {
@@ -59,10 +60,7 @@ export function LeftSidebar() {
     }
   };
 
-  const handleBpmInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const v = Number(e.target.value);
-    if (!isNaN(v) && v > 0) setBpm(v, 'manual');
-  };
+  const handleBpmChange = (v: number) => setBpm(v, 'manual');
 
   const handleRevertToAuto = () => {
     const refTrack = tracks.find(t => t.isReference);
@@ -115,7 +113,7 @@ export function LeftSidebar() {
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
             <label className="text-[9px] uppercase tracking-[0.12em] text-muted-foreground font-medium">
-              PROJECT BPM
+              GRID BPM
             </label>
             <span className={`text-[8px] uppercase tracking-[0.1em] font-medium px-1 ${
               bpmSource === 'auto'
@@ -130,23 +128,11 @@ export function LeftSidebar() {
 
           <div className="grid grid-cols-2 gap-2">
             <div className="relative">
-              <div className={`bg-[#111111] border h-9 flex items-center justify-center ${
-                bpmSource === 'auto' ? 'border-primary/40' : 'border-border'
+              <div className={`bg-[#0E1117] border h-9 ${
+                bpmSource === 'auto' ? 'border-[var(--color-signal)]/40' : 'border-border'
               }`}>
-                <input
-                  type="number"
-                  value={bpm}
-                  onChange={handleBpmInput}
-                  min={30}
-                  max={300}
-                  step={0.5}
-                  className="w-full h-full bg-transparent font-mono text-primary text-center text-base outline-none"
-                  title="Project BPM — affects beat grid and segment division"
-                />
+                <BpmDragField value={bpm} onChange={handleBpmChange} className="h-9" />
               </div>
-              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[8px] font-mono text-muted-foreground/50 pointer-events-none select-none">
-                BPM
-              </span>
             </div>
 
             <Button
@@ -290,7 +276,7 @@ export function LeftSidebar() {
               </div>
             </div>
 
-            {/* Per-track avg BPM badge + Use button */}
+            {/* Per-track detected BPM (analysis only) — USE copies to grid BPM */}
             <div className="flex items-center gap-1.5 mb-1.5">
               {track.estimatedBpm !== null ? (
                 <>
@@ -301,7 +287,7 @@ export function LeftSidebar() {
                       ? 'border-border text-foreground/70'
                       : 'border-amber-500/40 text-amber-400/80'
                   }`}>
-                    <span>Avg BPM: {track.estimatedBpm}</span>
+                    <span>Detected: {track.estimatedBpm}</span>
                     {track.bpmConfidence < 0.35 && (
                       <span className="text-amber-400 ml-0.5" title={`Low confidence (${Math.round(track.bpmConfidence * 100)}%) — consider manual override`}>?</span>
                     )}
@@ -314,9 +300,9 @@ export function LeftSidebar() {
                   <button
                     onClick={() => setBpm(track.estimatedBpm!, 'auto')}
                     className="px-1.5 py-0.5 border border-primary/30 text-[8px] uppercase tracking-[0.08em] text-primary/60 hover:text-primary hover:border-primary hover:bg-primary/5 transition-colors font-medium leading-none"
-                    title={`Set project grid to ${track.estimatedBpm} BPM`}
+                    title={`Apply detected ${track.estimatedBpm} BPM to grid (auto)`}
                   >
-                    USE
+                    → GRID
                   </button>
                 </>
               ) : (
@@ -332,7 +318,7 @@ export function LeftSidebar() {
                 size="sm"
                 className={`h-5 text-[9px] uppercase tracking-[0.08em] px-2 rounded-none ${track.isReference ? 'border border-primary text-primary' : 'border border-border text-muted-foreground hover:border-primary/50'}`}
                 onClick={() => setReferenceTrack(track.id)}
-                title={track.estimatedBpm ? `Set as reference grid — will set project BPM to ${track.estimatedBpm}` : 'Set as reference grid'}
+                title="Default track for source playback when no arrangement clips exist"
               >
                 {track.isReference ? 'MASTER' : 'SET MASTER'}
               </Button>
@@ -347,9 +333,12 @@ export function LeftSidebar() {
               <div className="flex-1 px-1">
                 <Slider
                   value={[track.volume]}
+                  min={0}
                   max={1}
                   step={0.01}
-                  onValueChange={([v]) => updateTrack(track.id, { volume: v })}
+                  onValueChange={([v]) => {
+                    if (v !== undefined) updateTrack(track.id, { volume: v });
+                  }}
                   className="flex-1"
                 />
               </div>

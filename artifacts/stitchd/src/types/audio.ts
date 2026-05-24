@@ -40,7 +40,8 @@ export interface Clip {
   label: string;
   sectionLabel?: SectionLabel;  // structural anchor — future: section matching, quantize, repair
   color?: string;
-  stretchRatio: number;     // 1.0 = no stretch
+  stretchRatio: number;     // tempo ratio (1.0 = native); pitch-preserving via SoundTouch
+  conformToProjectBpm?: boolean; // when true, stretchRatio tracks grid BPM changes
 }
 
 export interface WarpMarker {
