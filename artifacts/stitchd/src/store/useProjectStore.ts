@@ -115,6 +115,14 @@ interface ProjectState {
   selectedClipId: string | null;
   selectedTrackId: string | null;
   bpm: number;
+  // BPM the currently-playing audio is actually stretched to. Updated by the
+  // audio engine whenever it (re)schedules playback. Compared against `bpm`
+  // to drive the "APPLY TEMPO" button — BPM drag never auto-restretches.
+  appliedBpm: number;
+  // True while the audio engine is rendering a tempo change. Set by the
+  // APPLY TEMPO handlers; cleared in schedulePlayback's finally block.
+  // Drives the ApplyingTempoOverlay and gates Play / Space / duplicate Apply.
+  isApplyingTempo: boolean;
   bpmSource: BpmSource;   // 'auto' | 'tap' | 'manual'
   segmentMode: SegmentMode;
   zoomLevel: number;
@@ -143,6 +151,8 @@ interface ProjectState {
   selectClip: (id: string | null) => void;
   selectTrack: (id: string | null) => void;
   setBpm: (bpm: number, source?: BpmSource) => void;
+  setAppliedBpm: (bpm: number) => void;
+  setApplyingTempo: (v: boolean) => void;
   setSegmentMode: (mode: SegmentMode) => void;
   setZoom: (level: number) => void;
   setScroll: (pos: number) => void;
@@ -178,6 +188,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   selectedClipId: null,
   selectedTrackId: null,
   bpm: 120,
+  appliedBpm: 120,
+  isApplyingTempo: false,
   bpmSource: 'manual',
   segmentMode: 8,
   zoomLevel: 1,
@@ -262,10 +274,23 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       PAST_STATES.push(state);
       // First import: apply detected tempo to project grid only (per-track estimatedBpm stays separate)
       const applyDetectedToGrid = isFirstTrack && detectedBpm !== null;
+
+      // Auto-fit zoom on FIRST import only — fits the full song into the
+      // viewport with ~10% horizontal breathing room. Subsequent imports
+      // preserve the user's current zoom. Matches Timeline's
+      // baseVisibleDuration = 30 (zoom=1 → 30s visible).
+      let nextZoom = state.zoomLevel;
+      if (isFirstTrack && audioBuffer.duration > 0) {
+        const BASE_VISIBLE_DURATION = 30;
+        const targetVisible = audioBuffer.duration * 1.1;
+        nextZoom = Math.max(0.05, Math.min(20, BASE_VISIBLE_DURATION / targetVisible));
+      }
+
       return {
         tracks: [...state.tracks, newTrack],
         bpm: applyDetectedToGrid ? detectedBpm : state.bpm,
         bpmSource: applyDetectedToGrid ? 'auto' : state.bpmSource,
+        zoomLevel: nextZoom,
       };
     });
   },
@@ -366,8 +391,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     arrangementClips: reconformClipsToGrid(state.arrangementClips, state.tracks, bpm),
   })),
 
+  setAppliedBpm: (bpm: number) => set({ appliedBpm: bpm }),
+
+  setApplyingTempo: (v: boolean) => set({ isApplyingTempo: v }),
+
   setSegmentMode: (mode: SegmentMode) => set({ segmentMode: mode }),
-  setZoom: (level: number) => set({ zoomLevel: Math.max(0.1, Math.min(20, level)) }),
+  setZoom: (level: number) => set({ zoomLevel: Math.max(0.05, Math.min(20, level)) }),
   setScroll: (pos: number) => set({ scrollPosition: Math.max(0, pos) }),
   setPlaybackState: (state: PlaybackState) => set({ playbackState: state }),
   setPlayheadPosition: (pos: number) => set({ playheadPosition: pos }),

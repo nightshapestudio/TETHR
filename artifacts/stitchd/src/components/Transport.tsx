@@ -31,14 +31,29 @@ export function Transport() {
     playheadPosition,
     setPlayheadPosition,
     bpm,
+    appliedBpm,
     bpmSource,
     setBpm,
+    triggerPlay,
+    isApplyingTempo,
+    setApplyingTempo,
     zoomLevel,
     setZoom,
     isLooping,
     metronomeEnabled,
     setMetronomeEnabled,
   } = useProjectStore();
+
+  // Show APPLY TEMPO when the visible grid BPM has drifted from what audio
+  // is actually rendered at. Only meaningful during active playback — at
+  // stopped/paused, the next play picks up the current bpm automatically.
+  const tempoNeedsApply = playbackState === 'playing' && Math.abs(bpm - appliedBpm) > 0.001;
+
+  const handleApplyTempo = () => {
+    if (isApplyingTempo) return; // Guard against duplicate clicks
+    setApplyingTempo(true);
+    triggerPlay();
+  };
 
   const [showExport, setShowExport] = useState(false);
   const [showProject, setShowProject] = useState(false);
@@ -109,9 +124,13 @@ export function Transport() {
           </button>
 
           <button
-            className="w-10 h-10 flex items-center justify-center bg-[#111111] border border-border hover:border-primary/40 hover:bg-white/5 transition-all group relative"
-            onClick={() => setPlaybackState(playbackState === 'playing' ? 'paused' : 'playing')}
-            title="Play / Pause (Space)"
+            className="w-10 h-10 flex items-center justify-center bg-[#111111] border border-border hover:border-primary/40 hover:bg-white/5 transition-all group relative disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-border disabled:hover:bg-[#111111]"
+            onClick={() => {
+              if (isApplyingTempo) return;
+              setPlaybackState(playbackState === 'playing' ? 'paused' : 'playing');
+            }}
+            disabled={isApplyingTempo}
+            title={isApplyingTempo ? 'Applying tempo…' : 'Play / Pause (Space)'}
           >
             {playbackState === 'playing' ? (
               <svg width="14" height="14" viewBox="0 0 24 24" fill="hsl(176 82% 52%)" style={{ filter: 'drop-shadow(0 0 5px hsl(176 82% 46% / 0.85))' }}>
@@ -176,25 +195,44 @@ export function Transport() {
 
         <div className="w-px h-6 bg-border/60 shrink-0" />
 
-        {/* BPM display — clearly labelled, editable inline, shows source state */}
+        {/* TEMPO display — read-only mirror of the project tempo. The
+            single editable source of truth is the sidebar TEMPO field;
+            this just shows the current value while playing. */}
         <div
           className={`flex flex-col items-center justify-center px-2 py-1 border min-w-[72px] h-9 ${
             bpmSource === 'auto'
               ? 'border-[var(--color-signal)]/30 bg-[var(--color-signal)]/5'
               : 'border-border bg-[#0E1117]'
           }`}
-          title="Grid BPM — drag to adjust · double-click to type"
+          title="Project tempo — edit in the sidebar"
         >
           <span className="text-[7px] uppercase tracking-[0.12em] text-muted-foreground font-medium leading-none mb-0.5">
-            {bpmSource === 'auto' ? '◉ GRID' : bpmSource === 'tap' ? '♪ TAP' : 'GRID'}
+            {bpmSource === 'auto' ? '◉ TEMPO' : bpmSource === 'tap' ? '♪ TEMPO' : 'TEMPO'}
           </span>
-          <BpmDragField
-            value={bpm}
-            onChange={(v) => setBpm(v, 'manual')}
-            className="h-5"
-            label=""
-          />
+          <span
+            className="text-sm font-mono leading-none mt-0.5"
+            style={{ color: 'hsl(176 82% 52%)' }}
+          >
+            {bpm.toFixed(1)}
+          </span>
         </div>
+
+        {/* APPLY TEMPO — commits the grid BPM to the playing audio. Only
+            shown while playback is active and the grid has drifted from
+            what's actually rendered. Single click reschedules from the
+            current playhead at the new tempo (one stretch, no menus). */}
+        {tempoNeedsApply && (
+          <button
+            onClick={handleApplyTempo}
+            disabled={isApplyingTempo}
+            title={isApplyingTempo ? 'Applying…' : `Apply ${bpm} BPM to the playing audio`}
+            className="h-9 px-2.5 border border-primary/70 bg-primary/15 hover:bg-primary/25 text-primary text-[9px] uppercase tracking-[0.14em] font-medium transition-colors flex flex-col items-center justify-center leading-tight disabled:opacity-50 disabled:cursor-wait"
+            style={{ boxShadow: '0 0 8px hsl(176 82% 46% / 0.35)' }}
+          >
+            <span>APPLY</span>
+            <span className="text-[7px] tracking-[0.12em] opacity-80">TEMPO</span>
+          </button>
+        )}
 
         <div className="flex items-center border border-border">
           <Button

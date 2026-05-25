@@ -3,6 +3,7 @@ import { LeftSidebar } from './LeftSidebar';
 import { Timeline } from './Timeline';
 import { RightInspector } from './RightInspector';
 import { Transport } from './Transport';
+import { ApplyingTempoOverlay } from './ApplyingTempoOverlay';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { useAudioEngine } from '../hooks/useAudioEngine';
 
@@ -19,6 +20,7 @@ export default function StitchdEditor() {
         <RightInspector />
       </div>
       <Transport />
+      <ApplyingTempoOverlay />
     </div>
   );
 }

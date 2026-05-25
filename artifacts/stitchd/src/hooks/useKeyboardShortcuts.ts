@@ -19,7 +19,8 @@ export function useKeyboardShortcuts() {
     updateArrangementClip,
     setZoom,
     zoomLevel,
-    setToolMode
+    setToolMode,
+    isApplyingTempo
   } = useProjectStore();
 
   useEffect(() => {
@@ -32,6 +33,9 @@ export function useKeyboardShortcuts() {
       switch (e.key) {
         case ' ':
           e.preventDefault();
+          // Block play/pause while a tempo change is rendering. Stop (Esc/Enter)
+          // remains available below as an escape hatch.
+          if (isApplyingTempo) break;
           setPlaybackState(playbackState === 'playing' ? 'paused' : 'playing');
           break;
         case 'Escape':
@@ -135,6 +139,6 @@ export function useKeyboardShortcuts() {
     playbackState, setPlaybackState, selectedClipId, removeArrangementClip,
     duplicateArrangementClip, arrangementClips, addArrangementClip, undo, redo,
     selectedTrackId, updateTrack, tracks, setReferenceTrack, updateArrangementClip,
-    zoomLevel, setZoom, setToolMode
+    zoomLevel, setZoom, setToolMode, isApplyingTempo
   ]);
 }

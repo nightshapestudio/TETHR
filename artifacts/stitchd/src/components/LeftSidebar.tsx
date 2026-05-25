@@ -21,8 +21,13 @@ export function LeftSidebar() {
     setReferenceTrack,
     updateTrack,
     bpm,
+    appliedBpm,
     bpmSource,
     setBpm,
+    playbackState,
+    triggerPlay,
+    isApplyingTempo,
+    setApplyingTempo,
     segmentMode,
     setSegmentMode,
     toolMode,
@@ -32,6 +37,17 @@ export function LeftSidebar() {
     setSnapEnabled,
     setSnapResolution,
   } = useProjectStore();
+
+  // Mirrors Transport's tempoNeedsApply — surface the button next to both
+  // BPM editors so the user can commit a tempo change from wherever they're
+  // looking. Hidden when stopped/paused (next play picks up bpm automatically).
+  const tempoNeedsApply = playbackState === 'playing' && Math.abs(bpm - appliedBpm) > 0.001;
+
+  const handleApplyTempo = () => {
+    if (isApplyingTempo) return; // Guard against duplicate clicks
+    setApplyingTempo(true);
+    triggerPlay();
+  };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [tapTimes, setTapTimes] = useState<number[]>([]);
@@ -109,11 +125,12 @@ export function LeftSidebar() {
           multiple
         />
 
-        {/* Project BPM */}
+        {/* Project tempo — the single editable tempo field. The Transport
+            shows a read-only mirror of this value. */}
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
             <label className="text-[9px] uppercase tracking-[0.12em] text-muted-foreground font-medium">
-              GRID BPM
+              TEMPO
             </label>
             <span className={`text-[8px] uppercase tracking-[0.1em] font-medium px-1 ${
               bpmSource === 'auto'
@@ -143,6 +160,23 @@ export function LeftSidebar() {
               TAP
             </Button>
           </div>
+
+          {/* APPLY TEMPO — sidebar variant. Same action as the Transport
+              button (triggerPlay() reschedules at the new BPM from the
+              current playhead). Full-width so it's unmissable while the
+              user is editing the project TEMPO here. */}
+          {tempoNeedsApply && (
+            <button
+              onClick={handleApplyTempo}
+              disabled={isApplyingTempo}
+              title={isApplyingTempo ? 'Applying…' : `Apply ${bpm} BPM to the playing audio`}
+              className="w-full h-8 border border-primary/70 bg-primary/15 hover:bg-primary/25 text-primary text-[10px] uppercase tracking-[0.16em] font-medium transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-wait"
+              style={{ boxShadow: '0 0 10px hsl(176 82% 46% / 0.35)' }}
+            >
+              <span>Apply Tempo</span>
+              <span className="font-mono opacity-80">→ {Math.round(bpm)}</span>
+            </button>
+          )}
 
           {canRevertToAuto && (
             <button
@@ -300,9 +334,9 @@ export function LeftSidebar() {
                   <button
                     onClick={() => setBpm(track.estimatedBpm!, 'auto')}
                     className="px-1.5 py-0.5 border border-primary/30 text-[8px] uppercase tracking-[0.08em] text-primary/60 hover:text-primary hover:border-primary hover:bg-primary/5 transition-colors font-medium leading-none"
-                    title={`Apply detected ${track.estimatedBpm} BPM to grid (auto)`}
+                    title={`Use detected ${track.estimatedBpm} BPM as project tempo`}
                   >
-                    → GRID
+                    → TEMPO
                   </button>
                 </>
               ) : (

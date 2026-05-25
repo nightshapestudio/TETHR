@@ -7,6 +7,7 @@ import {
   type MetronomeBuffers,
 } from '../lib/metronome';
 import {
+  conformTempoRatio,
   getTimeStretchedSlice,
   stretchedTimelineDuration,
 } from '../lib/timeStretch';
@@ -410,9 +411,19 @@ export function useAudioEngine() {
       selectedTrackId,
       setPlayheadPosition,
       setPlaybackState,
+      setAppliedBpm,
+      setApplyingTempo,
       metronomeEnabled,
       bpm,
     } = useProjectStore.getState();
+
+    // Mark this BPM as the one audio is being rendered at — drives the
+    // "APPLY TEMPO" button in the Transport. Called early so the button
+    // hides as soon as the user commits the reschedule, even though the
+    // stretch may still be in flight for a moment.
+    setAppliedBpm(bpm);
+
+    try {
 
     stopMetronome();
 
@@ -473,8 +484,10 @@ export function useAudioEngine() {
 
     if (!hasClips) {
       // -------------------------------------------------------------------
-      // SOURCE-ONLY mode — play the focused track so users can audition
-      // tracks immediately after import, before any arrangement exists.
+      // SOURCE-ONLY mode — play the focused track tempo-corrected so users
+      // hear the full song conformed to the grid BPM immediately after
+      // import, before any arrangement exists. Pitch-preserving via the
+      // same SoundTouch path used by arrangement clips.
       // Priority: selectedTrackId → reference track → first track.
       // -------------------------------------------------------------------
       const sourceTrack =
@@ -488,9 +501,31 @@ export function useAudioEngine() {
         return;
       }
 
-      const buf    = sourceTrack.audioBuffer;
-      const cStart = Math.max(0, Math.min(buf.duration - 0.001, startOffset));
-      const cDur   = Math.max(0, buf.duration - cStart);
+      const ratio = conformTempoRatio(sourceTrack.estimatedBpm, bpm);
+
+      let playBuffer: AudioBuffer;
+      try {
+        playBuffer = await getTimeStretchedSlice(
+          ctx,
+          sourceTrack.id,
+          sourceTrack.audioBuffer,
+          0,
+          sourceTrack.audioBuffer.duration,
+          ratio,
+        );
+      } catch (err) {
+        console.error('[STITCHD] source-mode tempo conform failed', err);
+        stopAllSources();
+        setPlaybackState('stopped');
+        return;
+      }
+
+      // Bail if a newer playback generation started while we were stretching
+      if (gen !== playbackGenRef.current) return;
+
+      // Timeline maps 1:1 to the stretched buffer in source mode
+      const cStart = Math.max(0, Math.min(playBuffer.duration - 0.001, startOffset));
+      const cDur   = Math.max(0, playBuffer.duration - cStart);
       if (cDur <= 0) { stopAllSources(); setPlaybackState('stopped'); return; }
 
       const gainNode = ctx.createGain();
@@ -518,7 +553,7 @@ export function useAudioEngine() {
       });
 
       const source  = ctx.createBufferSource();
-      source.buffer = buf;
+      source.buffer = playBuffer;
       source.connect(gainNode);
       sourceNodesRef.current.push(source);
       source.start(ctx.currentTime, cStart, cDur);
@@ -687,6 +722,13 @@ export function useAudioEngine() {
       animFrameRef.current = requestAnimationFrame(tick);
     };
     animFrameRef.current = requestAnimationFrame(tick);
+
+    } finally {
+      // Always clear the "applying tempo" flag on completion — covers every
+      // exit path (success, early-return, gen-mismatch abort, thrown error).
+      // No-op when nothing set it (normal play / pause / clip-stretch reschedule).
+      setApplyingTempo(false);
+    }
   }, [stopAllSources, softStopSources, scheduleMetronome, stopMetronome]);
 
   // React to playback state transitions
@@ -713,22 +755,31 @@ export function useAudioEngine() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playbackState, playTrigger]);
 
-  // Reschedule when grid BPM / clip stretch ratios change during playback
+  // Reschedule when an arrangement clip's stretch ratio changes during
+  // playback — but ONLY for user-driven clip edits, not for the per-clip
+  // reconform that setBpm() triggers via reconformClipsToGrid(). BPM
+  // changes never auto-restretch audio; the user commits them via the
+  // "APPLY TEMPO" button in the Transport (bumps playTrigger).
   useEffect(() => {
     return useProjectStore.subscribe((state, prevState) => {
       if (!isPlayingRef.current || state.playbackState !== 'playing') return;
-      if (state.bpm === prevState.bpm && state.arrangementClips === prevState.arrangementClips) return;
+      if (state.arrangementClips === prevState.arrangementClips) return;
 
       const stretchChanged = state.arrangementClips.some(c => {
         const prev = prevState.arrangementClips.find(p => p.id === c.id);
         return !prev || prev.stretchRatio !== c.stretchRatio;
       });
-      if (!stretchChanged && state.bpm === prevState.bpm) return;
+      const bpmChanged = state.bpm !== prevState.bpm;
+      // BPM-induced clip reconforms travel with bpmChanged=true; ignore them.
+      const userStretchChanged = stretchChanged && !bpmChanged;
+      if (!userStretchChanged) return;
 
       const ctx = contextRef.current;
       if (!ctx || ctx.state === 'closed') return;
       const pos = startOffsetRef.current + (ctx.currentTime - startTimeRef.current);
-      void schedulePlayback(pos).catch(err => console.error('[STITCHD] stretch/BPM reschedule failed', err));
+      void schedulePlayback(pos).catch(err =>
+        console.error('[STITCHD] clip-stretch reschedule failed', err),
+      );
     });
   }, [schedulePlayback]);
 
