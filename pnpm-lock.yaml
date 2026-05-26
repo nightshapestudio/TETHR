@@ -408,7 +408,7 @@ importers:
         specifier: 'catalog:'
         version: 3.25.76
 
-  artifacts/stitchd:
+  artifacts/tethr:
     dependencies:
       '@soundtouchjs/audio-worklet':
         specifier: ^2.0.3

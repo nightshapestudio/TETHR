@@ -61,7 +61,7 @@ Implemented and confirmed clean:
 Data model:
 - SectionLabel union type: intro | verse | pre | chorus | bridge | breakdown | outro
 - sectionLabel?: SectionLabel added to Clip interface
-- Serializes automatically in .stitchd project files
+- Serializes automatically in .tethr project files
 - Designed for future: section matching, quantize, timing repair, one-click replacement
 
 Constants:
@@ -185,15 +185,15 @@ ARCHITECTURE NOTES
 KEY FILES
 ====================================================
 
-artifacts/stitchd/src/hooks/useAudioEngine.ts       - Web Audio engine + WAV renderer
-artifacts/stitchd/src/store/useProjectStore.ts      - Zustand store (source of truth)
-artifacts/stitchd/src/components/StitchdEditor.tsx  - Top-level layout
-artifacts/stitchd/src/components/Timeline.tsx       - Track rows + waveform view
-artifacts/stitchd/src/components/ArrangementLane.tsx - Clip drag/drop lane
-artifacts/stitchd/src/components/ClipBlock.tsx      - Individual clip move/trim/split
-artifacts/stitchd/src/components/RightInspector.tsx - Clip properties panel
-artifacts/stitchd/src/components/CrossfadeEditor.tsx - Fade in/out + 1B preset
-artifacts/stitchd/src/components/LeftSidebar.tsx    - BPM, snap controls, tools
-artifacts/stitchd/src/lib/snapUtils.ts              - snapPosition + snapForward
-artifacts/stitchd/src/lib/sectionLabels.ts          - SECTION_LABELS constants + helpers
-artifacts/stitchd/src/types/audio.ts               - All TypeScript types
+artifacts/tethr/src/hooks/useAudioEngine.ts       - Web Audio engine + WAV renderer
+artifacts/tethr/src/store/useProjectStore.ts      - Zustand store (source of truth)
+artifacts/tethr/src/components/TethrEditor.tsx  - Top-level layout
+artifacts/tethr/src/components/Timeline.tsx       - Track rows + waveform view
+artifacts/tethr/src/components/ArrangementLane.tsx - Clip drag/drop lane
+artifacts/tethr/src/components/ClipBlock.tsx      - Individual clip move/trim/split
+artifacts/tethr/src/components/RightInspector.tsx - Clip properties panel
+artifacts/tethr/src/components/CrossfadeEditor.tsx - Fade in/out + 1B preset
+artifacts/tethr/src/components/LeftSidebar.tsx    - BPM, snap controls, tools
+artifacts/tethr/src/lib/snapUtils.ts              - snapPosition + snapForward
+artifacts/tethr/src/lib/sectionLabels.ts          - SECTION_LABELS constants + helpers
+artifacts/tethr/src/types/audio.ts               - All TypeScript types
