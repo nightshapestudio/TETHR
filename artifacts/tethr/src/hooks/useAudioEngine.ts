@@ -11,6 +11,11 @@ import {
   getTimeStretchedSlice,
   stretchedTimelineDuration,
 } from '../lib/timeStretch';
+import {
+  beatCorrectedDuration,
+  getBeatCorrectedBuffer,
+  sourceTimeToCorrectedTime,
+} from '../lib/beatCorrection';
 
 // ---------------------------------------------------------------------------
 // Module-level meter analysers — read by LevelMeter without prop drilling
@@ -100,7 +105,6 @@ export async function renderArrangement(sampleRate: number = 44100): Promise<Blo
       return new Blob([], { type: 'audio/wav' });
     }
 
-    const ratio = conformTempoRatio(sourceTrack.estimatedBpm, bpm);
     let buffer = sourceTrack.audioBuffer;
 
     // Resample to target sampleRate if needed
@@ -117,13 +121,29 @@ export async function renderArrangement(sampleRate: number = 44100): Promise<Blo
       buffer = await resCtx.startRendering();
     }
 
+    const ratio = conformTempoRatio(sourceTrack.estimatedBpm, bpm);
+    const correctedDuration = beatCorrectedDuration(sourceTrack.beatCorrectionMap, bpm, buffer.duration);
+    const fallbackDuration = buffer.duration / Math.max(0.05, ratio);
     const offlineCtx = new OfflineAudioContext(
       2,
-      Math.ceil(sampleRate * (buffer.duration / Math.max(0.05, ratio) + 0.25)),
+      Math.ceil(sampleRate * ((sourceTrack.beatCorrectionMap ? correctedDuration : fallbackDuration) + 0.25)),
       sampleRate,
     );
 
-    const stretched = await getTimeStretchedSlice(
+    let beatCorrected: AudioBuffer | null = null;
+    try {
+      beatCorrected = await getBeatCorrectedBuffer(
+        offlineCtx,
+        sourceTrack.id,
+        buffer,
+        sourceTrack.beatCorrectionMap,
+        bpm,
+      );
+    } catch (err) {
+      console.error('[TETHR] export beat-map correction failed; falling back to global conform', err);
+    }
+
+    const stretched = beatCorrected ?? await getTimeStretchedSlice(
       offlineCtx,
       sourceTrack.id,
       buffer,
@@ -140,10 +160,14 @@ export async function renderArrangement(sampleRate: number = 44100): Promise<Blo
     const trackVol = Math.max(0, sourceTrack.volume);
     masterGain.gain.setValueAtTime(trackVol, 0);
 
-    // Mute regions are in SOURCE seconds; convert to OUTPUT seconds via ratio.
+    // Mute regions are in SOURCE seconds; convert to corrected OUTPUT time.
     for (const m of mutes) {
-      const outStart = m.start / Math.max(0.05, ratio);
-      const outEnd   = m.end   / Math.max(0.05, ratio);
+      const outStart = beatCorrected
+        ? sourceTimeToCorrectedTime(sourceTrack.beatCorrectionMap, m.start, bpm)
+        : m.start / Math.max(0.05, ratio);
+      const outEnd = beatCorrected
+        ? sourceTimeToCorrectedTime(sourceTrack.beatCorrectionMap, m.end, bpm)
+        : m.end / Math.max(0.05, ratio);
       // Quick fade out → silence → fade back. Avoids clicks.
       const fade = 0.008;
       try {
@@ -349,7 +373,7 @@ export function useAudioEngine() {
   }, []);
 
   const getContentEndTimeline = useCallback((): number => {
-    const { arrangementClips, tracks } = useProjectStore.getState();
+    const { arrangementClips, tracks, bpm } = useProjectStore.getState();
     if (arrangementClips.length > 0) {
       return Math.max(
         ...arrangementClips.map(c => {
@@ -358,7 +382,11 @@ export function useAudioEngine() {
         }),
       );
     }
-    if (tracks.length > 0) return Math.max(...tracks.map(t => t.duration));
+    if (tracks.length > 0) {
+      return Math.max(...tracks.map(t =>
+        beatCorrectedDuration(t.beatCorrectionMap, bpm, t.audioBuffer?.duration ?? t.duration),
+      ));
+    }
     return 0;
   }, []);
 
@@ -577,18 +605,50 @@ export function useAudioEngine() {
 
       const ratio = conformTempoRatio(sourceTrack.estimatedBpm, bpm);
 
-      let playBuffer: AudioBuffer;
+      let playBuffer: AudioBuffer | null = null;
+      let usingBeatCorrection = false;
       try {
-        playBuffer = await getTimeStretchedSlice(
+        const corrected = await getBeatCorrectedBuffer(
           ctx,
           sourceTrack.id,
           sourceTrack.audioBuffer,
-          0,
-          sourceTrack.audioBuffer.duration,
-          ratio,
+          sourceTrack.beatCorrectionMap,
+          bpm,
         );
+        if (corrected) {
+          playBuffer = corrected;
+          usingBeatCorrection = true;
+        } else {
+          playBuffer = await getTimeStretchedSlice(
+            ctx,
+            sourceTrack.id,
+            sourceTrack.audioBuffer,
+            0,
+            sourceTrack.audioBuffer.duration,
+            ratio,
+          );
+        }
       } catch (err) {
-        console.error('[TETHR] source-mode tempo conform failed', err);
+        console.error('[TETHR] beat-map tempo correction failed', err);
+        try {
+          playBuffer = await getTimeStretchedSlice(
+            ctx,
+            sourceTrack.id,
+            sourceTrack.audioBuffer,
+            0,
+            sourceTrack.audioBuffer.duration,
+            ratio,
+          );
+        } catch (fallbackErr) {
+          console.error('[TETHR] source-mode tempo conform failed', fallbackErr);
+          stopAllSources();
+          setPlaybackState('stopped');
+          return;
+        }
+      }
+
+      if (!playBuffer) {
+        console.error('[TETHR] no corrected playback buffer available');
         stopAllSources();
         setPlaybackState('stopped');
         return;
@@ -633,16 +693,19 @@ export function useAudioEngine() {
       source.start(ctx.currentTime, cStart, cDur);
 
       // Honor sectionMutes — automate the gain to drop to 0 across muted
-      // regions (in OUTPUT seconds, i.e. SOURCE seconds / ratio). The
+      // regions (in corrected OUTPUT seconds). The
       // anti-click envelope above gives us the baseline; we punch holes.
       const mutes = sourceTrack.sectionMutes || [];
       if (mutes.length > 0) {
-        const safeRatio = Math.max(0.05, ratio);
         const trackVol = Math.max(0, sourceTrack.volume);
         const fade = 0.008;
         for (const m of mutes) {
-          const outStart = m.start / safeRatio;
-          const outEnd   = m.end   / safeRatio;
+          const outStart = usingBeatCorrection
+            ? sourceTimeToCorrectedTime(sourceTrack.beatCorrectionMap, m.start, bpm)
+            : m.start / Math.max(0.05, ratio);
+          const outEnd = usingBeatCorrection
+            ? sourceTimeToCorrectedTime(sourceTrack.beatCorrectionMap, m.end, bpm)
+            : m.end / Math.max(0.05, ratio);
           // Only schedule if the mute region overlaps the playing window.
           if (outEnd <= cStart || outStart >= cStart + cDur) continue;
           const muteStartCtx = ctx.currentTime + Math.max(0, outStart - cStart);

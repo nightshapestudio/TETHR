@@ -14,8 +14,30 @@ export interface AudioTrack {
   volume: number;           // 0-1
   estimatedBpm: number | null;  // detected BPM, null if detection failed or not run
   bpmConfidence: number;        // 0–1, autocorrelation confidence
+  beatCorrectionMap?: BeatCorrectionMap | null; // transient beat map for local timing correction
   structureSegments: StructureSegment[];  // heuristic structure (intro/verse/chorus/…)
   sectionMutes: SectionMute[];  // direct-manipulation mute regions (source seconds)
+}
+
+/** One detected musical beat in source time. Target time is derived from
+ *  project BPM at render time so manual BPM changes remain pitch-preserving. */
+export interface BeatMarker {
+  index: number;
+  sourceTime: number;
+  confidence: number;
+  strength: number;
+}
+
+/** Source-time beat map used to correct natural drift against a steady grid. */
+export interface BeatCorrectionMap {
+  sourceBpm: number;
+  beatInterval: number;
+  firstBeatTime: number;
+  sourceDuration: number;
+  markers: BeatMarker[];
+  confidence: number;
+  averageDriftMs: number;
+  maxDriftMs: number;
 }
 
 /** A muted region on the source track — silences during playback & export

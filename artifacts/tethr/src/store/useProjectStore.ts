@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { AudioTrack, Clip, PlaybackState, SegmentMode, ToolMode, BpmSource, SnapResolution, SectionMute } from '../types/audio';
 import { conformTempoRatio, clearStretchCacheForTrack } from '../lib/timeStretch';
 import { detectStructure } from '../lib/structureDetection';
+import { clearBeatCorrectionCacheForTrack, detectBeatCorrectionMap } from '../lib/beatCorrection';
 
 function reconformClipsToGrid(clips: Clip[], tracks: AudioTrack[], projectBpm: number): Clip[] {
   return clips.map(c => {
@@ -288,7 +289,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // sizing; falls back to project BPM if detection failed.
     const structureBpm = detectedBpm ?? get().bpm;
     const structureSegments = detectStructure(audioBuffer, structureBpm);
+    const beatCorrectionMap = detectBeatCorrectionMap(audioBuffer, structureBpm);
     const trackId = crypto.randomUUID();
+
+    if (beatCorrectionMap) {
+      console.log(
+        `[TETHR auto-correct] beats: ${beatCorrectionMap.markers.length} | avg drift: ${beatCorrectionMap.averageDriftMs.toFixed(1)}ms | max drift: ${beatCorrectionMap.maxDriftMs.toFixed(1)}ms | confidence: ${Math.round(beatCorrectionMap.confidence * 100)}%`,
+      );
+    } else {
+      console.log('[TETHR auto-correct] beat map unavailable | using global pitch-preserving conform fallback');
+    }
 
     const newTrack: AudioTrack = {
       id: trackId,
@@ -306,6 +316,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       volume: 1.0,
       estimatedBpm: detectedBpm,
       bpmConfidence: confidence,
+      beatCorrectionMap,
       structureSegments,
       sectionMutes: [],
     };
@@ -352,6 +363,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   removeTrack: (id: string) => set((state) => {
     PAST_STATES.push(state);
     clearStretchCacheForTrack(id);
+    clearBeatCorrectionCacheForTrack(id);
     return {
       tracks: state.tracks.filter(t => t.id !== id),
       arrangementClips: state.arrangementClips.filter(c => c.trackId !== id),
@@ -612,6 +624,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           volume: typeof t.volume === 'number' ? t.volume : 1.0,
           estimatedBpm: t.estimatedBpm ?? null,
           bpmConfidence: t.bpmConfidence ?? 0,
+          beatCorrectionMap: t.beatCorrectionMap ?? detectBeatCorrectionMap(audioBuffer, t.estimatedBpm ?? project.bpm ?? 120),
           structureSegments: t.structureSegments ?? [],
           sectionMutes: t.sectionMutes ?? [],
         });

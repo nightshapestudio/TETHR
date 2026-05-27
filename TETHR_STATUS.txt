@@ -11,7 +11,8 @@ segmentation tool.
 Primary workflow:
 1. Import one audio track.
 2. Analyze detected BPM and tempo state.
-3. Auto-correct playback/export through the pitch-preserving SoundTouch path.
+3. Auto-correct playback/export through a transient beat-map and the
+   pitch-preserving SoundTouch path.
 4. Make the corrected track the active working track automatically.
 5. Detect structural changes and display neutral segments:
    Segment 01, Segment 02, Segment 03, etc.
@@ -22,10 +23,14 @@ CURRENT IMPLEMENTATION NOTES
 - Import replaces the current working track instead of appending more tracks.
 - Imported audio becomes the selected active track immediately.
 - Detected BPM anchors the project tempo when available.
+- Import analyzes transient timing across the full song and stores a local
+  beat correction map when confidence is high enough.
 - Import clears active clip state so playback stays on the single-track path.
+- Playback/export render local beat-to-grid stretch regions from the beat map.
+- If beat-map confidence is too low, playback/export fall back to the global
+  pitch-preserving conform path rather than changing pitch.
 - Structure detection remains heuristic and energy-based.
 - Segment labels are intentionally neutral; semantic section naming is deferred.
-- The existing pitch-preserving tempo path is preserved.
 
 CURRENT UX DIRECTION
 ====================================================
@@ -39,8 +44,8 @@ CURRENT UX DIRECTION
 KNOWN LIMITS
 ====================================================
 
-- Per-beat drift maps and local transient-aware warping are not implemented yet.
-- Current correction uses the existing global pitch-preserving tempo conform path.
+- Beat detection is onset/transient-energy based, not ML-assisted.
+- Very sparse, ambient, or low-transient material may fall back to global conform.
 - Segment detection is automatic but heuristic; labels are not semantic.
 
 VALIDATION
