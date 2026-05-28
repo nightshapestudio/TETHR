@@ -3,14 +3,23 @@ import Foundation
 @MainActor
 final class TethrEditorViewModel: ObservableObject {
     @Published private(set) var project = TethrProject()
+    @Published private(set) var composition = TethrCompositionState()
     @Published private(set) var playheadProgress: Double = 0
     @Published private(set) var isPlaying = false
     @Published var isImportPresented = false
 
     private let audioEngine: TethrAudioEngineProtocol
+    private let sharedSegmentPipeline: TethrSharedSegmentAnalysisPipeline
+    private let compositePlanner: TethrCompositePlanning
 
-    init(audioEngine: TethrAudioEngineProtocol = TethrAudioEngine()) {
+    init(
+        audioEngine: TethrAudioEngineProtocol = TethrAudioEngine(),
+        sharedSegmentPipeline: TethrSharedSegmentAnalysisPipeline = TethrSharedSegmentAnalysisPipeline(),
+        compositePlanner: TethrCompositePlanning = TethrCompositePlanner()
+    ) {
         self.audioEngine = audioEngine
+        self.sharedSegmentPipeline = sharedSegmentPipeline
+        self.compositePlanner = compositePlanner
     }
 
     var sourceTitle: String {
@@ -74,6 +83,7 @@ final class TethrEditorViewModel: ObservableObject {
             Task {
                 do {
                     let summary = try await audioEngine.inspectSource(at: url)
+                    registerSource(summary, url: url, slot: .primary)
                     project.sourceName = summary.fileName
                     project.sourceDuration = summary.duration
                     project.importState = .loaded
@@ -103,5 +113,53 @@ final class TethrEditorViewModel: ObservableObject {
     func resetPlayhead() {
         isPlaying = false
         playheadProgress = 0
+    }
+
+    func registerSource(_ summary: TethrSourceSummary, url: URL?, slot: TethrSourceSlot) {
+        let source = TethrSourceTrack(
+            slot: slot,
+            fileName: summary.fileName,
+            duration: summary.duration,
+            originalURL: url
+        )
+        composition.upsertSource(source)
+        project.segmentCount = composition.sharedSegmentMap?.segments.count ?? 0
+
+        Task {
+            await analyzeSharedSegmentsIfReady()
+        }
+    }
+
+    func selectSource(_ sourceID: TethrSourceTrack.ID, for segmentID: TethrSharedSegment.ID) {
+        composition.selectSource(sourceID, for: segmentID)
+        refreshCompositePlan()
+    }
+
+    private func analyzeSharedSegmentsIfReady() async {
+        do {
+            guard let segmentMap = try await sharedSegmentPipeline.analyzeIfReady(composition) else {
+                refreshCompositePlan()
+                return
+            }
+
+            composition.applySharedSegmentMap(segmentMap)
+            project.segmentCount = segmentMap.segments.count
+            project.detectedBpm = segmentMap.detectedBpm
+            project.bpmConfidence = segmentMap.confidence
+            project.correctionState = .ready
+            refreshCompositePlan()
+        } catch {
+            project.correctionState = .conservative
+            refreshCompositePlan()
+        }
+    }
+
+    private func refreshCompositePlan() {
+        do {
+            let plan = try compositePlanner.makePlan(from: composition)
+            composition.updateCompositePlan(plan)
+        } catch {
+            composition.updateCompositePlan(.empty)
+        }
     }
 }

@@ -17,6 +17,9 @@
 		A10000000000000000000008 /* TelemetryPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000008 /* TelemetryPanel.swift */; };
 		A10000000000000000000009 /* TransportBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000009 /* TransportBar.swift */; };
 		A1000000000000000000000A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000A /* Assets.xcassets */; };
+		A1000000000000000000000B /* TethrComposition.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000C /* TethrComposition.swift */; };
+		A1000000000000000000000C /* TethrSharedSegmentAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000D /* TethrSharedSegmentAnalyzer.swift */; };
+		A1000000000000000000000D /* TethrCompositePlanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000E /* TethrCompositePlanner.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -31,6 +34,9 @@
 		A20000000000000000000009 /* TransportBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransportBar.swift; sourceTree = "<group>"; };
 		A2000000000000000000000A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A2000000000000000000000B /* TETHR_iOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TETHR_iOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A2000000000000000000000C /* TethrComposition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TethrComposition.swift; sourceTree = "<group>"; };
+		A2000000000000000000000D /* TethrSharedSegmentAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TethrSharedSegmentAnalyzer.swift; sourceTree = "<group>"; };
+		A2000000000000000000000E /* TethrCompositePlanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TethrCompositePlanner.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -46,6 +52,7 @@
 			isa = PBXGroup;
 			children = (
 				A30000000000000000000003 /* App */,
+				A3000000000000000000000B /* Analysis */,
 				A30000000000000000000004 /* Audio */,
 				A30000000000000000000005 /* Models */,
 				A30000000000000000000006 /* Theme */,
@@ -68,6 +75,7 @@
 			isa = PBXGroup;
 			children = (
 				A20000000000000000000002 /* TethrAudioEngine.swift */,
+				A2000000000000000000000E /* TethrCompositePlanner.swift */,
 			);
 			path = Audio;
 			sourceTree = "<group>";
@@ -76,6 +84,7 @@
 			isa = PBXGroup;
 			children = (
 				A20000000000000000000003 /* TethrProject.swift */,
+				A2000000000000000000000C /* TethrComposition.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -121,6 +130,14 @@
 				A2000000000000000000000B /* TETHR_iOS.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		A3000000000000000000000B /* Analysis */ = {
+			isa = PBXGroup;
+			children = (
+				A2000000000000000000000D /* TethrSharedSegmentAnalyzer.swift */,
+			);
+			path = Analysis;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -200,6 +217,9 @@
 				A10000000000000000000007 /* WaveformPlaceholderView.swift in Sources */,
 				A10000000000000000000008 /* TelemetryPanel.swift in Sources */,
 				A10000000000000000000009 /* TransportBar.swift in Sources */,
+				A1000000000000000000000B /* TethrComposition.swift in Sources */,
+				A1000000000000000000000C /* TethrSharedSegmentAnalyzer.swift in Sources */,
+				A1000000000000000000000D /* TethrCompositePlanner.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
