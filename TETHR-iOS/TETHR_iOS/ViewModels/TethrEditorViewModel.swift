@@ -36,6 +36,26 @@ final class TethrEditorViewModel: ObservableObject {
         self.audioEngine = audioEngine
         self.sharedSegmentPipeline = sharedSegmentPipeline
         self.compositePlanner = compositePlanner
+
+        restorePersistedComposition()
+    }
+
+    /// Restores a saved composition on launch. If the snapshot is missing,
+    /// undecodable, or references a sandbox file that no longer exists, the
+    /// stale snapshot is cleared and the app starts in its normal empty state.
+    private func restorePersistedComposition() {
+        guard let snapshot = TethrCompositionStore.load() else { return }
+        guard let restored = snapshot.restoredState() else {
+            TethrCompositionStore.clear()
+            return
+        }
+        project = restored.project
+        composition = restored.composition
+        appScreen = .composite
+    }
+
+    private func persistComposition() {
+        TethrCompositionStore.save(TethrCompositionSnapshot(project: project, composition: composition))
     }
 
     var sourceTitle: String {
@@ -97,6 +117,7 @@ final class TethrEditorViewModel: ObservableObject {
         isPlaying = false
         stopPlayheadUpdates()
         appScreen = .empty
+        TethrCompositionStore.clear()
     }
 
     func presentExport() {
@@ -182,6 +203,7 @@ final class TethrEditorViewModel: ObservableObject {
                     }
                     project.importState = .loaded
                     project.correctionState = .conservative
+                    persistComposition()
                     TethrImportDebug.shared.log("Import complete", summary.fileName) // DEBUG-IMPORT
                 } catch {
                     let message = (error as? LocalizedError)?.errorDescription
@@ -219,6 +241,7 @@ final class TethrEditorViewModel: ObservableObject {
                 audioEngine.setPlaybackRate(currentPlaybackRate)
             }
             refreshCompositePlan()
+            persistComposition()
         }
     }
 
@@ -300,6 +323,7 @@ final class TethrEditorViewModel: ObservableObject {
     func selectSource(_ sourceID: TethrSourceTrack.ID, for segmentID: TethrSharedSegment.ID) {
         composition.selectSource(sourceID, for: segmentID)
         refreshCompositePlan()
+        persistComposition()
     }
 
     private func analyzeSharedSegmentsIfReady() async {
@@ -319,6 +343,7 @@ final class TethrEditorViewModel: ObservableObject {
             project.bpmConfidence = segmentMap.confidence
             project.correctionState = .ready
             refreshCompositePlan()
+            persistComposition()
             if appScreen == .analyzing {
                 appScreen = .composite
             }

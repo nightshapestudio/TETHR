@@ -325,8 +325,7 @@ final class TethrAudioEngine: TethrAudioEngineProtocol {
     }
 
     private var importDirectory: URL {
-        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("TETHR Imports", isDirectory: true)
+        TethrStorage.importsDirectory
     }
 }
 

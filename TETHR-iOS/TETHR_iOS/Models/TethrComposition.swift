@@ -224,3 +224,190 @@ struct TethrCompositionState: Equatable {
         }
     }
 }
+
+// MARK: - Persistence
+
+/// Single source of truth for on-disk locations. The imports directory holds the
+/// sandbox-copied audio; the composition file holds the restorable snapshot.
+enum TethrStorage {
+    static var documentsDirectory: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+    }
+
+    static var importsDirectory: URL {
+        documentsDirectory.appendingPathComponent("TETHR Imports", isDirectory: true)
+    }
+
+    static var compositionFile: URL {
+        documentsDirectory.appendingPathComponent("tethr-composition.json")
+    }
+}
+
+/// Codable snapshot of a composition. Sources are stored by their *relative*
+/// sandbox filename (not absolute or security-scoped URLs), because the iOS app
+/// container path changes between launches/reinstalls — absolute paths are stale.
+struct TethrCompositionSnapshot: Codable {
+    struct Source: Codable {
+        var id: UUID
+        var slot: String
+        var fileName: String
+        var sandboxFileName: String
+        var duration: TimeInterval
+        var detectedBpm: Double?
+        var bpmConfidence: Double?
+    }
+
+    struct Segment: Codable {
+        var id: UUID
+        var index: Int
+        var startTime: TimeInterval
+        var duration: TimeInterval
+        var label: String
+    }
+
+    struct BeatMarker: Codable {
+        var id: UUID
+        var beatIndex: Int
+        var detectedTime: TimeInterval
+        var confidence: Double
+    }
+
+    var version = 1
+    var sources: [Source]
+    var segments: [Segment]
+    var beatMarkers: [BeatMarker]
+    var segmentDetectedBpm: Double?
+    var segmentConfidence: Double
+    var selections: [String: UUID] // segmentID.uuidString -> sourceID
+    var masterBpm: Int?
+    var isMasterBpmManual: Bool
+    var bpmConfidence: Double?
+    var sourceName: String?
+    var sourceDuration: TimeInterval?
+    var detectedBpm: Double?
+
+    /// Builds a snapshot from live state. Returns nil when there is nothing
+    /// worth persisting (no primary source with a sandbox file).
+    init?(project: TethrProject, composition: TethrCompositionState) {
+        guard composition.source(in: .primary)?.originalURL != nil else { return nil }
+
+        sources = composition.sources.compactMap { source in
+            guard let url = source.originalURL else { return nil }
+            return Source(
+                id: source.id,
+                slot: source.slot.rawValue,
+                fileName: source.fileName,
+                sandboxFileName: url.lastPathComponent,
+                duration: source.duration,
+                detectedBpm: source.detectedBpm,
+                bpmConfidence: source.bpmConfidence
+            )
+        }
+        guard !sources.isEmpty else { return nil }
+
+        let map = composition.sharedSegmentMap
+        segments = map?.segments.map {
+            Segment(id: $0.id, index: $0.index, startTime: $0.startTime, duration: $0.duration, label: $0.label)
+        } ?? []
+        beatMarkers = map?.beatMarkers.map {
+            BeatMarker(id: $0.id, beatIndex: $0.beatIndex, detectedTime: $0.detectedTime, confidence: $0.confidence)
+        } ?? []
+        segmentDetectedBpm = map?.detectedBpm
+        segmentConfidence = map?.confidence ?? 0
+        selections = Dictionary(uniqueKeysWithValues: composition.selectionsBySegmentID.map { ($0.key.uuidString, $0.value) })
+
+        masterBpm = project.masterBpm
+        isMasterBpmManual = project.isMasterBpmManual
+        bpmConfidence = project.bpmConfidence
+        sourceName = project.sourceName
+        sourceDuration = project.sourceDuration
+        detectedBpm = project.detectedBpm
+    }
+
+    /// Rebuilds live state, verifying every sandbox file still exists. Returns
+    /// nil if any source file is missing (caller should fall back to empty).
+    func restoredState() -> (project: TethrProject, composition: TethrCompositionState)? {
+        var tracks: [TethrSourceTrack] = []
+        for source in sources {
+            let url = TethrStorage.importsDirectory.appendingPathComponent(source.sandboxFileName)
+            guard FileManager.default.fileExists(atPath: url.path),
+                  let slot = TethrSourceSlot(rawValue: source.slot) else { return nil }
+            tracks.append(
+                TethrSourceTrack(
+                    id: source.id,
+                    slot: slot,
+                    fileName: source.fileName,
+                    duration: source.duration,
+                    originalURL: url,
+                    detectedBpm: source.detectedBpm,
+                    bpmConfidence: source.bpmConfidence
+                )
+            )
+        }
+        guard !tracks.isEmpty else { return nil }
+
+        var composition = TethrCompositionState()
+        composition.sources = tracks
+
+        let restoredSegments = segments.map {
+            TethrSharedSegment(id: $0.id, index: $0.index, startTime: $0.startTime, duration: $0.duration, label: $0.label)
+        }
+        if !restoredSegments.isEmpty {
+            composition.sharedSegmentMap = TethrSharedSegmentMap(
+                sourceIDs: tracks.map(\.id),
+                segments: restoredSegments,
+                beatMarkers: beatMarkers.map {
+                    TethrBeatMarker(id: $0.id, beatIndex: $0.beatIndex, detectedTime: $0.detectedTime, confidence: $0.confidence)
+                },
+                detectedBpm: segmentDetectedBpm,
+                confidence: segmentConfidence
+            )
+            var restoredSelections: [TethrSharedSegment.ID: TethrSourceTrack.ID] = [:]
+            for (key, sourceID) in selections {
+                guard let segmentID = UUID(uuidString: key),
+                      restoredSegments.contains(where: { $0.id == segmentID }),
+                      tracks.contains(where: { $0.id == sourceID }) else { continue }
+                restoredSelections[segmentID] = sourceID
+            }
+            composition.selectionsBySegmentID = restoredSelections
+        }
+
+        var project = TethrProject()
+        project.sourceName = sourceName
+        project.sourceDuration = sourceDuration
+        project.detectedBpm = detectedBpm
+        project.masterBpm = masterBpm
+        project.isMasterBpmManual = isMasterBpmManual
+        project.bpmConfidence = bpmConfidence
+        project.importState = .loaded
+        project.correctionState = restoredSegments.isEmpty ? .conservative : .ready
+        project.segmentCount = restoredSegments.count
+
+        return (project, composition)
+    }
+}
+
+/// Reads/writes the composition snapshot as JSON in the app sandbox.
+enum TethrCompositionStore {
+    static func save(_ snapshot: TethrCompositionSnapshot?) {
+        guard let snapshot else {
+            clear()
+            return
+        }
+        do {
+            let data = try JSONEncoder().encode(snapshot)
+            try data.write(to: TethrStorage.compositionFile, options: .atomic)
+        } catch {
+            // Persistence is best-effort; a failed write must never break the app.
+        }
+    }
+
+    static func load() -> TethrCompositionSnapshot? {
+        guard let data = try? Data(contentsOf: TethrStorage.compositionFile) else { return nil }
+        return try? JSONDecoder().decode(TethrCompositionSnapshot.self, from: data)
+    }
+
+    static func clear() {
+        try? FileManager.default.removeItem(at: TethrStorage.compositionFile)
+    }
+}
