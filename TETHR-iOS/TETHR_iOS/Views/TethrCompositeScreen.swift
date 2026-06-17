@@ -40,10 +40,11 @@ struct TethrCompositeScreen: View {
     @ObservedObject var orientationLock: OrientationLockManager
     let isLandscape: Bool
 
-    @State private var headFrac: Double = 0
-    @State private var isPlaying: Bool = false
-    @State private var animationTimer: Timer?
     @State private var isBpmSheetPresented: Bool = false
+
+    // Playback state lives on the view model (real audio), not the view.
+    private var isPlaying: Bool { viewModel.isPlaying }
+    private var headFrac: Double { viewModel.playheadProgress }
 
     // MARK: Real composition data
 
@@ -131,15 +132,14 @@ struct TethrCompositeScreen: View {
                     segmentList
 
                     TethrCompositeTransport(
-                        isPlaying: $isPlaying,
-                        headFrac: $headFrac,
+                        isPlaying: viewModel.isPlaying,
+                        progress: viewModel.playheadProgress,
                         bpm: viewModel.currentMasterBpm,
                         totalBars: realTotalBars,
                         safeAreaBottom: max(12, geo.safeAreaInsets.bottom),
-                        onStop: {
-                            isPlaying = false
-                            headFrac = 0
-                        }
+                        onPlayPause: { viewModel.togglePlayback() },
+                        onStop: { viewModel.resetPlayhead() },
+                        onSeek: { viewModel.seek(to: $0) }
                     )
                 }
                 .background(TethrTheme.bg0)
@@ -158,10 +158,6 @@ struct TethrCompositeScreen: View {
                 }
             }
         }
-        .onChange(of: isPlaying) { _, playing in
-            if playing { startTicker() } else { stopTicker() }
-        }
-        .onDisappear { stopTicker() }
         .alert(
             exportAlertTitle,
             isPresented: Binding(
@@ -302,23 +298,6 @@ struct TethrCompositeScreen: View {
         }
     }
 
-    private func startTicker() {
-        stopTicker()
-        let totalSeconds = max(0.5, realTotalDuration)
-        let start = Date()
-        let startFrac = headFrac
-        animationTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { _ in
-            let elapsed = Date().timeIntervalSince(start)
-            let advance = elapsed / max(0.001, totalSeconds)
-            let next = (startFrac + advance).truncatingRemainder(dividingBy: 1.0)
-            headFrac = next
-        }
-    }
-
-    private func stopTicker() {
-        animationTimer?.invalidate()
-        animationTimer = nil
-    }
 }
 
 // MARK: - Top bar
@@ -1064,21 +1043,23 @@ struct TethrSynthWaveform: View {
 // MARK: - Transport
 
 private struct TethrCompositeTransport: View {
-    @Binding var isPlaying: Bool
-    @Binding var headFrac: Double
+    let isPlaying: Bool
+    let progress: Double
     let bpm: Int
     var totalBars: Int = 116
     let safeAreaBottom: CGFloat
+    let onPlayPause: () -> Void
     let onStop: () -> Void
+    let onSeek: (Double) -> Void
 
-    private var bar: Int { Int(headFrac * Double(totalBars)) + 1 }
-    private var beat: Int { Int((headFrac * Double(totalBars) * 4).truncatingRemainder(dividingBy: 4)) + 1 }
+    private var bar: Int { Int(progress * Double(totalBars)) + 1 }
+    private var beat: Int { Int((progress * Double(totalBars) * 4).truncatingRemainder(dividingBy: 4)) + 1 }
     private var primaryColor: Color { isPlaying ? TethrTheme.magenta : TethrTheme.violet }
 
     var body: some View {
         HStack(spacing: 16) {
             // play / pause
-            Button(action: { isPlaying.toggle() }) {
+            Button(action: onPlayPause) {
                 Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                     .font(.system(size: 20, weight: .bold))
                     .foregroundStyle(primaryColor)
@@ -1113,7 +1094,7 @@ private struct TethrCompositeTransport: View {
             }
 
             // scrub — custom NIGHTSHAPE rail/fill/thumb (no default Slider).
-            TethrScrubBar(value: $headFrac)
+            TethrScrubBar(value: progress, onSeek: onSeek)
                 .frame(height: 28)
         }
         .padding(.horizontal, 14)
@@ -1132,7 +1113,8 @@ private struct TethrCompositeTransport: View {
 /// NIGHTSHAPE scrub control — square rail, accent fill, capsule thumb that lights
 /// while dragging (mirrors the DRUMKIT slider language). Replaces SwiftUI Slider.
 private struct TethrScrubBar: View {
-    @Binding var value: Double
+    let value: Double
+    let onSeek: (Double) -> Void
     @State private var isDragging = false
 
     var body: some View {
@@ -1172,7 +1154,7 @@ private struct TethrScrubBar: View {
                 DragGesture(minimumDistance: 0)
                     .onChanged { g in
                         isDragging = true
-                        value = Double(max(0, min(1, g.location.x / max(1, trackW))))
+                        onSeek(Double(max(0, min(1, g.location.x / max(1, trackW)))))
                     }
                     .onEnded { _ in isDragging = false }
             )

@@ -305,6 +305,15 @@ final class TethrEditorViewModel: ObservableObject {
         playheadProgress = 0
     }
 
+    /// Scrub to a normalized position. Restarts playback from there if playing.
+    func seek(to progress: Double) {
+        playheadProgress = min(max(progress, 0), 1)
+        guard isPlaying,
+              let source = composition.source(in: .primary) ?? composition.sources.first,
+              let url = source.originalURL else { return }
+        try? audioEngine.playSource(at: url, from: playheadProgress, rate: currentPlaybackRate)
+    }
+
     func registerSource(_ summary: TethrSourceSummary, url: URL?, slot: TethrSourceSlot) {
         let source = TethrSourceTrack(
             slot: slot,
