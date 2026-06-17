@@ -321,20 +321,34 @@ final class TethrAudioEngine: TethrAudioEngineProtocol {
         guard let player else { return }
 
         let clampedProgress = min(max(progress, 0), 0.999)
-        player.enableRate = true
-        player.rate = Float(clampedPlaybackRate(rate))
+        applyPlaybackRate(rate, to: player)
 
         if player.duration.isFinite && player.duration > 0 {
             player.currentTime = player.duration * clampedProgress
         }
 
-        player.play()
+        if !player.play() {
+            Self.logger.error("playSource: play() returned false for \(url.lastPathComponent, privacy: .public)")
+        }
     }
 
     func setPlaybackRate(_ rate: Double) {
         guard let player else { return }
-        player.enableRate = true
-        player.rate = Float(clampedPlaybackRate(rate))
+        applyPlaybackRate(rate, to: player)
+    }
+
+    /// AVAudioPlayer's time-stretch unit (engaged by `enableRate`) can render
+    /// silent/glitchy output. Only engage it for a meaningful tempo change;
+    /// otherwise play back at the source's natural rate so audio is reliable.
+    private func applyPlaybackRate(_ rate: Double, to player: AVAudioPlayer) {
+        let clamped = clampedPlaybackRate(rate)
+        if abs(clamped - 1.0) > 0.03 {
+            player.enableRate = true
+            player.rate = Float(clamped)
+        } else {
+            player.enableRate = false
+            player.rate = 1.0
+        }
     }
 
     func pausePlayback() {
