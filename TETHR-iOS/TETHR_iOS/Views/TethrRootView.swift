@@ -65,13 +65,18 @@ struct TethrRootView: View {
     }
 
     private func emptyShell(isLandscape: Bool, geo: GeometryProxy) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            emptyHeader(isLandscape: isLandscape)
-            emptyLanding
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 14) {
+                emptyHeader(isLandscape: isLandscape)
+                emptyLanding
+            }
+            .padding(.horizontal, isLandscape ? 30 : 20)
+            .padding(.top, isLandscape ? 38 : max(60, geo.safeAreaInsets.top + 24))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            TethrStatusStrip(leading: "AUTO-CORRECT · SINGLE TRACK", trailing: "READY")
+                .padding(.bottom, max(8, geo.safeAreaInsets.bottom))
         }
-        .padding(.horizontal, isLandscape ? 30 : 20)
-        .padding(.top, isLandscape ? 38 : max(60, geo.safeAreaInsets.top + 24))
-        .padding(.bottom, max(12, geo.safeAreaInsets.bottom))
     }
 
     private func emptyHeader(isLandscape: Bool) -> some View {
@@ -97,14 +102,34 @@ struct TethrRootView: View {
             .offset(y: orientationLock.lock == .landscape ? 14 : 26)
 
 #if DEBUG
-            // DEBUG-IMPORT-FIXTURE: deterministic simulator test button.
-            Button("IMPORT TEST FIXTURE") { viewModel.importDebugFixture() }
-                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                .foregroundStyle(.black)
-                .padding(.vertical, 10)
+            // DEBUG-IMPORT-FIXTURE: deterministic simulator test control.
+            // Deliberately rendered as a dim, secondary debug affordance.
+            Button(action: { viewModel.importDebugFixture() }) {
+                HStack(spacing: 8) {
+                    Text("DEBUG")
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .tracking(1.6)
+                        .foregroundStyle(Color.yellow.opacity(0.7))
+                    Text("LOAD TEST FIXTURE")
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .tracking(1.2)
+                        .foregroundStyle(TethrTheme.fg3)
+                    Spacer(minLength: 0)
+                    Text("\u{203A}")
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundStyle(Color.yellow.opacity(0.6))
+                }
+                .padding(.horizontal, 12)
+                .frame(height: 30)
                 .frame(maxWidth: .infinity)
-                .background(Color.yellow.opacity(0.85))
-                .padding(.top, 44)
+                .overlay(
+                    Rectangle().stroke(Color.yellow.opacity(0.34),
+                                       style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                )
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 34)
 #endif
 
             Spacer(minLength: 0)
@@ -408,63 +433,71 @@ private struct TethrEmptyImportPanel: View {
     var isLandscape: Bool = false
 
     var body: some View {
-        VStack(alignment: .trailing, spacing: 13) {
-            Button(action: action) {
-                VStack(alignment: .leading, spacing: 0) {
-                    VStack(alignment: .leading, spacing: 18) {
-                        Text("IMPORT AUDIO")
-                            .font(TethrFont.medium(13))
-                            .tracking(13 * 0.3)
-                            .foregroundStyle(TethrTheme.fg0)
-
-                        Text("Tap anywhere in this frame to load one song. Add a second take later only if section swaps are needed.")
-                            .font(TethrFont.light(12))
-                            .tracking(12 * 0.055)
-                            .lineSpacing(12 * 0.72)
-                            .textCase(.uppercase)
-                            .foregroundStyle(TethrTheme.fg2.opacity(0.9))
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: 480, alignment: .leading)
-                    }
-
-                    Spacer(minLength: 28)
-
-                    Text("WAV  ·  MP3  ·  M4A  ·  AIFF  ·  FLAC")
-                        .font(TethrFont.medium(10))
-                        .tracking(10 * 0.16)
-                        .foregroundStyle(TethrTheme.fg4)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.72)
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 0) {
+                // Card index / status marks — NIGHTSHAPE creation-path grammar.
+                HStack(alignment: .top) {
+                    Text("01")
+                        .font(TethrFont.medium(11))
+                        .tracking(0.8)
+                        .foregroundStyle(TethrTheme.fg3.opacity(0.76))
+                    Spacer()
+                    Text("\u{2022}\u{2022}\u{2022}")
+                        .font(TethrFont.medium(11))
+                        .tracking(1.4)
+                        .foregroundStyle(TethrTheme.fg3.opacity(0.5))
                 }
-                .frame(
-                    maxWidth: .infinity,
-                    minHeight: isLandscape ? 230 : 334,
-                    maxHeight: isLandscape ? 230 : 334,
-                    alignment: .topLeading
-                )
-                .padding(.horizontal, isLandscape ? 48 : 40)
-                .padding(.top, 34)
-                .padding(.bottom, 30)
-                .background(Color(red: 11 / 255, green: 11 / 255, blue: 14 / 255).opacity(0.48))
-                .overlay(
-                    Rectangle()
-                        .stroke(
-                            TethrTheme.fg3.opacity(0.2),
-                            style: StrokeStyle(lineWidth: 1, dash: [6, 7])
-                        )
-                )
-                .overlay(TethrCornerCaps(color: TethrTheme.cyan))
-            }
-            .buttonStyle(.plain)
+                .padding(.bottom, 22)
 
-            Text("TAP TO IMPORT")
-                .font(TethrFont.medium(10))
-                .tracking(10 * 0.18)
-                .foregroundStyle(TethrTheme.fg4)
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("IMPORT AUDIO")
+                        .font(TethrFont.bold(15))
+                        .tracking(2.0)
+                        .foregroundStyle(TethrTheme.fg0)
+
+                    Text("Load one song to auto-correct. Add a second take later only if section swaps are needed.")
+                        .font(TethrFont.light(12))
+                        .tracking(12 * 0.055)
+                        .lineSpacing(12 * 0.72)
+                        .textCase(.uppercase)
+                        .foregroundStyle(TethrTheme.fg2.opacity(0.9))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: 480, alignment: .leading)
+                }
+
+                Spacer(minLength: 24)
+
+                Text("WAV  \u{00B7}  MP3  \u{00B7}  M4A  \u{00B7}  AIFF  \u{00B7}  FLAC")
+                    .font(TethrFont.medium(10))
+                    .tracking(10 * 0.16)
+                    .foregroundStyle(TethrTheme.fg4)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+                    .padding(.bottom, 16)
+
+                TethrActionControl(label: "Select file", accent: TethrTheme.cyan)
+            }
+            .frame(
+                maxWidth: .infinity,
+                minHeight: isLandscape ? 230 : 334,
+                maxHeight: isLandscape ? 230 : 334,
+                alignment: .topLeading
+            )
+            .padding(.horizontal, isLandscape ? 40 : 30)
+            .padding(.top, 26)
+            .padding(.bottom, 22)
+            .background(Color(red: 11 / 255, green: 11 / 255, blue: 14 / 255).opacity(0.48))
+            .overlay(
+                Rectangle()
+                    .stroke(
+                        TethrTheme.fg3.opacity(0.2),
+                        style: StrokeStyle(lineWidth: 1, dash: [6, 7])
+                    )
+            )
+            .overlay(TethrCornerMarks(color: TethrTheme.cyan, opacity: 0.5, length: 16))
         }
-        .accessibilityLabel("Import audio. Tap to load one song. Add a second take later only if section swaps are needed.")
+        .buttonStyle(.plain)
+        .accessibilityLabel("Import audio. Load one song to auto-correct. Add a second take later only if section swaps are needed.")
     }
 }
 

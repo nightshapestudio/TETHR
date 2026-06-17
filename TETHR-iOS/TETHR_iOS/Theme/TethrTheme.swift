@@ -158,3 +158,156 @@ struct TethrSignalButtonStyle: ButtonStyle {
             .scaleEffect(configuration.isPressed ? 0.985 : 1)
     }
 }
+
+// MARK: - NIGHTSHAPE shared chrome
+//
+// These mirror the conventions in nightshape-drumkit-ios so TETHR reads as the
+// same product family: L-bracket corner marks, square accent-stroked controls,
+// a `+ LABEL ›` workstation action bar, and a thin footer status strip.
+
+/// L-shaped corner brackets drawn just inside a panel's edges — the canonical
+/// NIGHTSHAPE panel framing (see DRUMKIT `panelCornerMarks`).
+struct TethrCornerMarks: View {
+    var color: Color = TethrTheme.cyan
+    var opacity: Double = 0.34
+    var inset: CGFloat = 1
+    var length: CGFloat = 13
+
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            let h = geo.size.height
+            Path { path in
+                path.move(to: CGPoint(x: inset, y: length))
+                path.addLine(to: CGPoint(x: inset, y: inset))
+                path.addLine(to: CGPoint(x: length, y: inset))
+
+                path.move(to: CGPoint(x: w - length, y: inset))
+                path.addLine(to: CGPoint(x: w - inset, y: inset))
+                path.addLine(to: CGPoint(x: w - inset, y: length))
+
+                path.move(to: CGPoint(x: inset, y: h - length))
+                path.addLine(to: CGPoint(x: inset, y: h - inset))
+                path.addLine(to: CGPoint(x: length, y: h - inset))
+
+                path.move(to: CGPoint(x: w - length, y: h - inset))
+                path.addLine(to: CGPoint(x: w - inset, y: h - inset))
+                path.addLine(to: CGPoint(x: w - inset, y: h - length))
+            }
+            .stroke(color.opacity(opacity), style: StrokeStyle(lineWidth: 1, lineCap: .square, lineJoin: .miter))
+        }
+        .allowsHitTesting(false)
+    }
+}
+
+/// Workstation action control: `＋  LABEL  ›`, accent-stroked with a lit bottom
+/// edge. Used for IMPORT / EXPORT so they read as console controls, not buttons.
+struct TethrActionControl: View {
+    let label: String
+    var accent: Color = TethrTheme.cyan
+    var leadingGlyph: String = "+"
+    var height: CGFloat = 44
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Text(leadingGlyph)
+                .font(TethrFont.bold(13))
+                .foregroundStyle(accent.opacity(0.78))
+                .frame(width: 26)
+
+            Spacer(minLength: 6)
+
+            Text(label)
+                .font(TethrFont.bold(9.5))
+                .tracking(2.5)
+                .textCase(.uppercase)
+                .foregroundStyle(accent.opacity(0.84))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+
+            Spacer(minLength: 6)
+
+            Text("\u{203A}")
+                .font(TethrFont.bold(16))
+                .foregroundStyle(accent.opacity(0.78))
+                .frame(width: 26)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: height)
+        .background(TethrTheme.bg2.opacity(0.54))
+        .overlay(Rectangle().stroke(accent.opacity(0.72), lineWidth: 1.25))
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(accent.opacity(0.28)).frame(height: 1)
+        }
+    }
+}
+
+/// Square accent-stroked chrome control (DRUMKIT power/transport tile language).
+struct TethrChromeButton<Label: View>: View {
+    var accent: Color = TethrTheme.fg2
+    var isActive: Bool = false
+    let action: () -> Void
+    @ViewBuilder var label: () -> Label
+
+    var body: some View {
+        Button(action: action) {
+            label()
+                .foregroundStyle(isActive ? accent : TethrTheme.fg1)
+                .frame(width: 40, height: 40)
+                .background(Color(red: 16 / 255, green: 16 / 255, blue: 22 / 255))
+                .overlay(
+                    Rectangle().stroke(
+                        (isActive ? accent : TethrTheme.line2).opacity(isActive ? 0.62 : 1),
+                        lineWidth: 1
+                    )
+                )
+                .shadow(color: accent.opacity(isActive ? 0.35 : 0), radius: 5)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// Thin footer status strip — the workstation chrome band (DRUMKIT footer).
+struct TethrStatusStrip: View {
+    var leading: String
+    var trailing: String
+    var leadingAccent: Color = TethrTheme.fg3
+    var trailingAccent: Color = TethrTheme.fg3
+
+    var body: some View {
+        HStack {
+            Text(leading)
+                .font(TethrFont.medium(9))
+                .tracking(3)
+                .foregroundStyle(leadingAccent)
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            Text(trailing)
+                .font(TethrFont.medium(9))
+                .tracking(2.4)
+                .foregroundStyle(trailingAccent)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 20)
+        .frame(height: 34)
+        .frame(maxWidth: .infinity)
+        .background(Color(red: 8 / 255, green: 8 / 255, blue: 10 / 255).opacity(0.82))
+        .overlay(alignment: .top) {
+            Rectangle().fill(TethrTheme.fg2.opacity(0.05)).frame(height: 1)
+        }
+    }
+}
+
+/// "BY NIGHTSHAPE" byline — the family signature beneath any wordmark.
+struct TethrByline: View {
+    var size: CGFloat = 9
+    var opacity: Double = 0.62
+
+    var body: some View {
+        Text("BY NIGHTSHAPE")
+            .font(TethrFont.medium(size))
+            .tracking(size * 0.42)
+            .foregroundStyle(Color.white.opacity(opacity))
+            .accessibilityLabel("By Nightshape")
+    }
+}

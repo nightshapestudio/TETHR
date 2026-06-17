@@ -335,8 +335,12 @@ private struct TethrCompositeTopBar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .center, spacing: 10) {
-                TethrCompositeWordmark(size: 36)
+            HStack(alignment: .center, spacing: 8) {
+                VStack(alignment: .leading, spacing: 3) {
+                    TethrCompositeWordmark(size: 34)
+                    TethrByline(size: 7, opacity: 0.55)
+                        .padding(.leading, 1)
+                }
 
                 Spacer(minLength: 8)
 
@@ -347,7 +351,8 @@ private struct TethrCompositeTopBar: View {
                         .font(.system(size: 13, weight: .semibold))
                 }
 
-                TethrChromeIconButton(action: isExporting ? {} : onExport) {
+                // EXPORT — the console's output control: cyan-accented + glow.
+                TethrChromeIconButton(accent: TethrTheme.cyan, isAccented: true, action: isExporting ? {} : onExport) {
                     if isExporting {
                         ProgressView()
                             .controlSize(.mini)
@@ -402,17 +407,24 @@ private struct TethrCompositeWordmark: View {
 }
 
 private struct TethrChromeIconButton<Label: View>: View {
+    var accent: Color = TethrTheme.fg1
+    var isAccented: Bool = false
     let action: () -> Void
     @ViewBuilder var label: () -> Label
 
     var body: some View {
         Button(action: action) {
             label()
-                .foregroundStyle(TethrTheme.fg1)
+                .foregroundStyle(isAccented ? accent : TethrTheme.fg1)
                 .frame(width: 40, height: 40)
+                .background(Color(red: 16 / 255, green: 16 / 255, blue: 22 / 255))
                 .overlay(
-                    Rectangle().stroke(TethrTheme.line2, lineWidth: 1)
+                    Rectangle().stroke(
+                        isAccented ? accent.opacity(0.62) : TethrTheme.line2,
+                        lineWidth: 1
+                    )
                 )
+                .shadow(color: accent.opacity(isAccented ? 0.30 : 0), radius: 5)
         }
         .buttonStyle(.plain)
     }
@@ -545,22 +557,34 @@ private struct TethrEmptySlotCell: View {
                 Rectangle()
                     .fill(Color(red: 9 / 255, green: 9 / 255, blue: 11 / 255).opacity(0.5))
 
-                VStack(spacing: 4) {
+                VStack(spacing: 5) {
+                    Text("TAKE B")
+                        .font(TethrFont.bold(10))
+                        .tracking(10 * 0.24)
+                        .foregroundStyle(TethrTheme.fg3)
+
                     Text("EMPTY")
-                        .font(TethrFont.medium(9))
-                        .tracking(9 * 0.24)
+                        .font(TethrFont.medium(8))
+                        .tracking(8 * 0.26)
                         .foregroundStyle(TethrTheme.fg4)
 
-                    Text("TAP TO IMPORT")
-                        .font(TethrFont.medium(8))
-                        .tracking(8 * 0.22)
-                        .foregroundStyle(TethrTheme.magenta.opacity(0.7))
+                    HStack(spacing: 5) {
+                        Text("+")
+                            .font(TethrFont.bold(10))
+                            .foregroundStyle(TethrTheme.magenta.opacity(0.78))
+                        Text("IMPORT")
+                            .font(TethrFont.bold(8))
+                            .tracking(8 * 0.26)
+                            .foregroundStyle(TethrTheme.magenta.opacity(0.78))
+                    }
+                    .padding(.top, 2)
                 }
             }
             .overlay(
                 Rectangle()
-                    .stroke(TethrTheme.line1, style: StrokeStyle(lineWidth: 1, dash: [4, 5]))
+                    .stroke(TethrTheme.magenta.opacity(0.22), style: StrokeStyle(lineWidth: 1, dash: [4, 5]))
             )
+            .overlay(TethrCornerMarks(color: TethrTheme.magenta, opacity: 0.34, length: 11))
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
         }
@@ -644,9 +668,13 @@ private struct TethrRealTakeCell: View {
                 }
                 .overlay(
                     Rectangle()
-                        .stroke(isLive ? accent : TethrTheme.line1, lineWidth: 1)
+                        .stroke(isLive ? accent : TethrTheme.line1, lineWidth: isLive ? 1.3 : 1)
                 )
+                .overlay(alignment: .topLeading) {
+                    if isLive { TethrCornerMarks(color: accent, opacity: 0.5, length: 11) }
+                }
                 .opacity(isLive ? 1 : 0.62)
+                .shadow(color: accent.opacity(isLive ? 0.16 : 0), radius: 7)
                 .contentShape(Rectangle())
             }
         }
@@ -1084,12 +1112,9 @@ private struct TethrCompositeTransport: View {
                     .monospacedDigit()
             }
 
-            // scrub
-            Slider(
-                value: $headFrac,
-                in: 0...1
-            )
-            .tint(TethrTheme.cyan)
+            // scrub — custom NIGHTSHAPE rail/fill/thumb (no default Slider).
+            TethrScrubBar(value: $headFrac)
+                .frame(height: 28)
         }
         .padding(.horizontal, 14)
         .padding(.bottom, safeAreaBottom)
@@ -1101,5 +1126,57 @@ private struct TethrCompositeTransport: View {
                 .frame(height: 1),
             alignment: .top
         )
+    }
+}
+
+/// NIGHTSHAPE scrub control — square rail, accent fill, capsule thumb that lights
+/// while dragging (mirrors the DRUMKIT slider language). Replaces SwiftUI Slider.
+private struct TethrScrubBar: View {
+    @Binding var value: Double
+    @State private var isDragging = false
+
+    var body: some View {
+        GeometryReader { geo in
+            let trackW = geo.size.width
+            let barH: CGFloat = 9
+            let thumbW: CGFloat = 3
+            let thumbH: CGFloat = barH + 8
+            let fillX = trackW * CGFloat(max(0, min(1, value)))
+            let clampedThumb = max(0, min(trackW - thumbW, fillX - thumbW / 2))
+
+            ZStack(alignment: .leading) {
+                Rectangle().fill(Color(red: 17 / 255, green: 14 / 255, blue: 28 / 255))
+
+                Rectangle()
+                    .fill(LinearGradient(
+                        colors: [TethrTheme.cyanLo.opacity(0.8), TethrTheme.cyan.opacity(0.92)],
+                        startPoint: .leading, endPoint: .trailing
+                    ))
+                    .frame(width: max(2, fillX))
+
+                Capsule(style: .continuous)
+                    .fill(isDragging ? Color.white.opacity(0.96) : TethrTheme.cyan.opacity(0.9))
+                    .frame(width: thumbW, height: thumbH)
+                    .shadow(color: TethrTheme.cyan.opacity(isDragging ? 0.85 : 0), radius: isDragging ? 5 : 0)
+                    .offset(x: clampedThumb)
+            }
+            .frame(height: barH)
+            .frame(maxHeight: .infinity)
+            .overlay(
+                Rectangle().stroke(Color.white.opacity(isDragging ? 0.26 : 0.12), lineWidth: 1)
+                    .frame(height: barH)
+                    .frame(maxHeight: .infinity)
+            )
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { g in
+                        isDragging = true
+                        value = Double(max(0, min(1, g.location.x / max(1, trackW))))
+                    }
+                    .onEnded { _ in isDragging = false }
+            )
+            .animation(.easeOut(duration: 0.12), value: isDragging)
+        }
     }
 }
