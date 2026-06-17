@@ -2,21 +2,58 @@ import CoreText
 import SwiftUI
 
 enum TethrTheme {
-    static let matteBlack = Color(red: 12 / 255, green: 12 / 255, blue: 14 / 255)
-    static let panel = Color(red: 15 / 255, green: 15 / 255, blue: 18 / 255)
-    static let panelRaised = Color(red: 18 / 255, green: 18 / 255, blue: 22 / 255)
+    // Matte foundation — reference T.bg0..bg4
+    static let bg0 = Color(red: 13 / 255, green: 13 / 255, blue: 15 / 255)
+    static let bg1 = Color(red: 17 / 255, green: 17 / 255, blue: 19 / 255)
+    static let bg2 = Color(red: 21 / 255, green: 21 / 255, blue: 24 / 255)
+    static let bg3 = Color(red: 26 / 255, green: 26 / 255, blue: 30 / 255)
+    static let bg4 = Color(red: 34 / 255, green: 34 / 255, blue: 40 / 255)
 
-    static let text = Color(red: 224 / 255, green: 223 / 255, blue: 242 / 255)
-    static let textMid = Color(red: 194 / 255, green: 192 / 255, blue: 218 / 255)
-    static let textLow = Color(red: 170 / 255, green: 166 / 255, blue: 200 / 255)
-    static let textGhost = Color(red: 47 / 255, green: 45 / 255, blue: 64 / 255)
+    // Cool neutrals — reference T.fg0..fg5
+    static let fg0 = Color(red: 231 / 255, green: 236 / 255, blue: 246 / 255)
+    static let fg1 = Color(red: 206 / 255, green: 214 / 255, blue: 232 / 255)
+    static let fg2 = Color(red: 174 / 255, green: 184 / 255, blue: 205 / 255)
+    static let fg3 = Color(red: 125 / 255, green: 135 / 255, blue: 155 / 255)
+    static let fg4 = Color(red: 74 / 255, green: 82 / 255, blue: 99 / 255)
+    static let fg5 = Color(red: 37 / 255, green: 42 / 255, blue: 54 / 255)
 
-    static let border = textLow.opacity(0.16)
-    static let borderStrong = textMid.opacity(0.42)
+    // Spectral accents — reference suite canon
     static let cyan = Color(red: 0 / 255, green: 215 / 255, blue: 212 / 255)
-    static let cyanHigh = Color(red: 22 / 255, green: 242 / 255, blue: 234 / 255)
-    static let indigo = Color(red: 79 / 255, green: 99 / 255, blue: 255 / 255)
-    static let purple = Color(red: 166 / 255, green: 77 / 255, blue: 255 / 255)
+    static let cyanHi = Color(red: 22 / 255, green: 242 / 255, blue: 234 / 255)
+    static let cyanLo = Color(red: 0 / 255, green: 158 / 255, blue: 166 / 255)
+    static let teal = cyan
+    static let tealHi = cyanHi
+    static let tealLo = Color(red: 0 / 255, green: 184 / 255, blue: 200 / 255)
+    static let aqua = Color(red: 0 / 255, green: 169 / 255, blue: 255 / 255)
+    static let peri = Color(red: 79 / 255, green: 99 / 255, blue: 255 / 255)
+    static let periHi = Color(red: 110 / 255, green: 126 / 255, blue: 255 / 255)
+    static let periLo = Color(red: 47 / 255, green: 62 / 255, blue: 168 / 255)
+    static let violet = Color(red: 143 / 255, green: 92 / 255, blue: 255 / 255)
+    static let magenta = Color(red: 166 / 255, green: 77 / 255, blue: 255 / 255)
+    static let magentaHi = Color(red: 190 / 255, green: 125 / 255, blue: 255 / 255)
+    static let magentaLo = Color(red: 108 / 255, green: 46 / 255, blue: 179 / 255)
+    static let electricPurple = Color(red: 192 / 255, green: 61 / 255, blue: 255 / 255)
+    static let danger = Color(red: 242 / 255, green: 107 / 255, blue: 122 / 255)
+
+    // Hairlines — reference T.line1..line3
+    static let line1 = fg2.opacity(0.08)
+    static let line2 = fg2.opacity(0.22)
+    static let line3 = fg0.opacity(0.44)
+
+    // Legacy aliases — kept so existing call sites keep compiling
+    static let matteBlack = bg0
+    static let panel = bg1
+    static let panelRaised = bg2
+    static let text = fg0
+    static let textMid = fg2
+    static let textLow = fg3
+    static let textDim = fg4
+    static let textGhost = fg5
+    static let border = line1
+    static let borderStrong = line2
+    static let cyanHigh = cyanHi
+    static let indigo = peri
+    static let purple = magenta
 
     private static let fontResourceNames = [
         "NIGHTSHAPE-UI-Bold",
@@ -65,6 +102,10 @@ enum TethrFont {
     }
 
     static func regular(_ size: CGFloat) -> Font {
+        .custom("NIGHTSHAPEUI-Regular", size: size)
+    }
+
+    static func medium(_ size: CGFloat) -> Font {
         .custom("NIGHTSHAPEUI-Regular", size: size)
     }
 

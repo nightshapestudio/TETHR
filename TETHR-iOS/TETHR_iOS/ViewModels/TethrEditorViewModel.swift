@@ -1,19 +1,32 @@
 import Foundation
+import os
+
+enum AppScreen: Equatable {
+    case launch
+    case empty
+    case analyzing
+    case composite
+    case export
+}
 
 @MainActor
 final class TethrEditorViewModel: ObservableObject {
+    @Published private(set) var appScreen: AppScreen = .launch
     @Published private(set) var project = TethrProject()
     @Published private(set) var composition = TethrCompositionState()
     @Published private(set) var playheadProgress: Double = 0
     @Published private(set) var isPlaying = false
     @Published var isImportPresented = false
+    @Published var importErrorMessage: String?
 
+    private static let logger = Logger(subsystem: "com.nightshape.tethr", category: "import")
     private let bpmRange = 60...200
     private let audioEngine: TethrAudioEngineProtocol
     private let sharedSegmentPipeline: TethrSharedSegmentAnalysisPipeline
     private let compositePlanner: TethrCompositePlanning
     private var pendingImportSlot: TethrSourceSlot = .primary
     private var tapTempoHistory: [Date] = []
+    private var playbackTask: Task<Void, Never>?
 
     init(
         audioEngine: TethrAudioEngineProtocol = TethrAudioEngine(),
@@ -31,6 +44,10 @@ final class TethrEditorViewModel: ObservableObject {
 
     var currentMasterBpm: Int {
         project.masterBpm ?? project.detectedBpm.map { Int($0.rounded()) } ?? 128
+    }
+
+    var waveformBeatMarkers: [TethrBeatMarker] {
+        composition.sharedSegmentMap?.beatMarkers ?? []
     }
 
     var telemetryItems: [TethrTelemetryItem] {
@@ -66,19 +83,70 @@ final class TethrEditorViewModel: ObservableObject {
         ]
     }
 
+    // MARK: - Screen transitions
+
+    func advanceFromLaunch() {
+        guard appScreen == .launch else { return }
+        appScreen = .empty
+    }
+
+    func returnToEmpty() {
+        composition = TethrCompositionState()
+        project = TethrProject()
+        playheadProgress = 0
+        isPlaying = false
+        stopPlayheadUpdates()
+        appScreen = .empty
+    }
+
+    func presentExport() {
+        guard appScreen == .composite else { return }
+        appScreen = .export
+    }
+
+    func dismissExport() {
+        guard appScreen == .export else { return }
+        appScreen = .composite
+    }
+
+    // MARK: - Import
+
     func presentImport(slot: TethrSourceSlot = .primary) {
         pendingImportSlot = slot
         isImportPresented = true
+        TethrImportDebug.shared.log("fileImporter opened", "slot=\(slot)") // DEBUG-IMPORT
     }
 
     func cancelImport() {
         isImportPresented = false
     }
 
+#if DEBUG
+    // DEBUG-IMPORT-FIXTURE: Imports a deterministic local fixture through the
+    // exact same path as a picker selection. Remove with the fixture feature.
+    func importDebugFixture(slot: TethrSourceSlot = .primary) {
+        pendingImportSlot = slot
+        TethrImportDebug.shared.log("Fixture import requested", "slot=\(slot)")
+        do {
+            let url = try TethrDebugFixture.resolveOrCreate()
+            handleImport(result: .success(url))
+        } catch {
+            let message = (error as? LocalizedError)?.errorDescription
+                ?? error.localizedDescription
+            TethrImportDebug.shared.log("Fixture import failed", message)
+            importErrorMessage = message
+            project.importState = .failed
+        }
+    }
+#endif
+
     func handleImport(result: Result<URL, Error>) {
+        isImportPresented = false
+
         switch result {
         case .success(let url):
             let importSlot = pendingImportSlot
+            importErrorMessage = nil
             project.importState = .reading
             if importSlot == .primary || project.sourceName == nil {
                 project.sourceName = url.lastPathComponent
@@ -93,25 +161,49 @@ final class TethrEditorViewModel: ObservableObject {
             playheadProgress = 0
             isPlaying = false
 
+            if appScreen == .launch || appScreen == .empty {
+                appScreen = .analyzing
+            }
+
+            TethrImportDebug.shared.log("Analyzing audio…", url.lastPathComponent) // DEBUG-IMPORT
             Task {
                 do {
-                    let summary = try await audioEngine.inspectSource(at: url)
+                    let summary = try await audioEngine.importSource(at: url)
                     registerSource(summary, url: url, slot: importSlot)
                     if importSlot == .primary || project.sourceName == nil {
                         project.sourceName = summary.fileName
                         project.sourceDuration = summary.duration
+                        project.detectedBpm = summary.tempoEstimate?.bpm
+                        project.bpmConfidence = summary.tempoEstimate?.confidence
+                        if project.masterBpm == nil, let detectedBpm = summary.tempoEstimate?.bpm {
+                            project.masterBpm = clampedBpm(Int(detectedBpm.rounded()))
+                            project.isMasterBpmManual = false
+                        }
                     }
                     project.importState = .loaded
                     project.correctionState = .conservative
+                    TethrImportDebug.shared.log("Import complete", summary.fileName) // DEBUG-IMPORT
                 } catch {
+                    let message = (error as? LocalizedError)?.errorDescription
+                        ?? error.localizedDescription
+                    TethrImportDebug.shared.log("Import failed", message) // DEBUG-IMPORT
+                    Self.logger.error("Import failed for \(url.lastPathComponent, privacy: .public): \(message, privacy: .public)")
+                    importErrorMessage = message
                     project.importState = .failed
                     project.correctionState = .standby
                     if importSlot == .primary || project.sourceName == nil {
                         project.sourceDuration = nil
                     }
+                    if appScreen == .analyzing {
+                        appScreen = .empty
+                    }
                 }
             }
-        case .failure:
+        case .failure(let error):
+            let message = (error as? LocalizedError)?.errorDescription
+                ?? error.localizedDescription
+            Self.logger.error("File picker failed: \(message, privacy: .public)")
+            importErrorMessage = message
             project.importState = .failed
             project.correctionState = .standby
         }
@@ -120,6 +212,14 @@ final class TethrEditorViewModel: ObservableObject {
     func setMasterBpm(_ bpm: Int) {
         project.masterBpm = clampedBpm(bpm)
         project.isMasterBpmManual = true
+
+        if project.hasSource {
+            project.correctionState = .ready
+            if isPlaying {
+                audioEngine.setPlaybackRate(currentPlaybackRate)
+            }
+            refreshCompositePlan()
+        }
     }
 
     func adjustMasterBpm(from baseBpm: Int, verticalTranslation: Double) {
@@ -141,19 +241,41 @@ final class TethrEditorViewModel: ObservableObject {
         guard averageInterval > 0 else { return }
 
         setMasterBpm(Int((60 / averageInterval).rounded()))
+        project.bpmConfidence = max(project.bpmConfidence ?? 0, 0.82)
     }
 
     func togglePlayback() {
-        guard project.hasSource else {
+        guard let source = composition.source(in: .primary) ?? composition.sources.first,
+              let playableURL = source.originalURL else {
             presentImport()
             return
         }
 
-        isPlaying.toggle()
-        playheadProgress = isPlaying ? max(playheadProgress, 0.08) : playheadProgress
+        if isPlaying {
+            audioEngine.pausePlayback()
+            isPlaying = false
+            stopPlayheadUpdates()
+            return
+        }
+
+        do {
+            try audioEngine.playSource(
+                at: playableURL,
+                from: playheadProgress,
+                rate: currentPlaybackRate
+            )
+            isPlaying = true
+            startPlayheadUpdates(duration: source.duration)
+        } catch {
+            isPlaying = false
+            stopPlayheadUpdates()
+            project.correctionState = .conservative
+        }
     }
 
     func resetPlayhead() {
+        audioEngine.stopPlayback()
+        stopPlayheadUpdates()
         isPlaying = false
         playheadProgress = 0
     }
@@ -163,7 +285,9 @@ final class TethrEditorViewModel: ObservableObject {
             slot: slot,
             fileName: summary.fileName,
             duration: summary.duration,
-            originalURL: url
+            originalURL: summary.playableURL,
+            detectedBpm: summary.tempoEstimate?.bpm,
+            bpmConfidence: summary.tempoEstimate?.confidence
         )
         composition.upsertSource(source)
         project.segmentCount = composition.sharedSegmentMap?.segments.count ?? 0
@@ -195,9 +319,15 @@ final class TethrEditorViewModel: ObservableObject {
             project.bpmConfidence = segmentMap.confidence
             project.correctionState = .ready
             refreshCompositePlan()
+            if appScreen == .analyzing {
+                appScreen = .composite
+            }
         } catch {
             project.correctionState = .conservative
             refreshCompositePlan()
+            if appScreen == .analyzing {
+                appScreen = .composite
+            }
         }
     }
 
@@ -212,5 +342,41 @@ final class TethrEditorViewModel: ObservableObject {
 
     private func clampedBpm(_ bpm: Int) -> Int {
         min(max(bpm, bpmRange.lowerBound), bpmRange.upperBound)
+    }
+
+    private var currentPlaybackRate: Double {
+        guard let detectedBpm = project.detectedBpm, detectedBpm > 0 else {
+            return 1
+        }
+
+        return min(2.0, max(0.5, Double(currentMasterBpm) / detectedBpm))
+    }
+
+    private func startPlayheadUpdates(duration: TimeInterval) {
+        stopPlayheadUpdates()
+
+        playbackTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 33_000_000)
+
+                await MainActor.run {
+                    guard let self else { return }
+
+                    let normalizedDuration = max(duration, 0.001)
+                    self.playheadProgress = min(1, max(0, self.audioEngine.currentTime / normalizedDuration))
+
+                    if !self.audioEngine.isPlaybackActive && self.playheadProgress >= 0.995 {
+                        self.isPlaying = false
+                        self.playheadProgress = 0
+                        self.stopPlayheadUpdates()
+                    }
+                }
+            }
+        }
+    }
+
+    private func stopPlayheadUpdates() {
+        playbackTask?.cancel()
+        playbackTask = nil
     }
 }

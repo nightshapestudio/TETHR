@@ -13,19 +13,44 @@ struct TethrSourceTrack: Identifiable, Equatable {
     var fileName: String
     var duration: TimeInterval
     var originalURL: URL?
+    var detectedBpm: Double?
+    var bpmConfidence: Double?
 
     init(
         id: UUID = UUID(),
         slot: TethrSourceSlot,
         fileName: String,
         duration: TimeInterval,
-        originalURL: URL? = nil
+        originalURL: URL? = nil,
+        detectedBpm: Double? = nil,
+        bpmConfidence: Double? = nil
     ) {
         self.id = id
         self.slot = slot
         self.fileName = fileName
         self.duration = duration
         self.originalURL = originalURL
+        self.detectedBpm = detectedBpm
+        self.bpmConfidence = bpmConfidence
+    }
+}
+
+struct TethrBeatMarker: Identifiable, Equatable {
+    let id: UUID
+    var beatIndex: Int
+    var detectedTime: TimeInterval
+    var confidence: Double
+
+    init(
+        id: UUID = UUID(),
+        beatIndex: Int,
+        detectedTime: TimeInterval,
+        confidence: Double
+    ) {
+        self.id = id
+        self.beatIndex = beatIndex
+        self.detectedTime = detectedTime
+        self.confidence = confidence
     }
 }
 
@@ -59,6 +84,7 @@ struct TethrSharedSegmentMap: Equatable {
     let id: UUID
     var sourceIDs: [TethrSourceTrack.ID]
     var segments: [TethrSharedSegment]
+    var beatMarkers: [TethrBeatMarker]
     var detectedBpm: Double?
     var confidence: Double
 
@@ -66,12 +92,14 @@ struct TethrSharedSegmentMap: Equatable {
         id: UUID = UUID(),
         sourceIDs: [TethrSourceTrack.ID],
         segments: [TethrSharedSegment],
+        beatMarkers: [TethrBeatMarker] = [],
         detectedBpm: Double? = nil,
         confidence: Double = 0
     ) {
         self.id = id
         self.sourceIDs = sourceIDs
         self.segments = segments
+        self.beatMarkers = beatMarkers
         self.detectedBpm = detectedBpm
         self.confidence = confidence
     }
@@ -122,7 +150,7 @@ struct TethrCompositionState: Equatable {
     var compositePlan: TethrCompositePlan = .empty
 
     var canAnalyzeSharedSegments: Bool {
-        sources.count >= 2
+        !sources.isEmpty
     }
 
     var selectedSegments: [TethrSegmentSelection] {
