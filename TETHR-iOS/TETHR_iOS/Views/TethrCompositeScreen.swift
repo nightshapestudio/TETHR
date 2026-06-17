@@ -1,7 +1,6 @@
 import SwiftUI
 
-// MARK: - Mock segment seed (mirrors reference SEGMENTS in tokens.jsx)
-// Used until the real shared-segment analyzer returns named structural segments.
+// MARK: - Take / drift display types
 
 enum TethrTake: String, CaseIterable, Equatable, Identifiable {
     case A
@@ -34,53 +33,6 @@ enum TethrDriftDirection: String, Equatable {
     }
 }
 
-struct TethrTakeData: Equatable {
-    var driftMs: Int
-    var direction: TethrDriftDirection
-    var seed: Double
-    var energy: Double
-}
-
-struct TethrSegmentSeed: Identifiable, Equatable {
-    let id: Int
-    let name: String
-    let number: String
-    let span: Int   // bars
-    let takeA: TethrTakeData
-    let takeB: TethrTakeData
-}
-
-extension TethrSegmentSeed {
-    static let defaults: [TethrSegmentSeed] = [
-        .init(id: 0, name: "INTRO",     number: "01", span: 8,
-              takeA: .init(driftMs: 11, direction: .forward, seed: 1.2, energy: 0.30),
-              takeB: .init(driftMs: 6,  direction: .on,      seed: 4.1, energy: 0.26)),
-        .init(id: 1, name: "VERSE 01",  number: "02", span: 16,
-              takeA: .init(driftMs: 18, direction: .back,    seed: 2.7, energy: 0.58),
-              takeB: .init(driftMs: 9,  direction: .forward, seed: 5.3, energy: 0.55)),
-        .init(id: 2, name: "CHORUS 01", number: "03", span: 16,
-              takeA: .init(driftMs: 7,  direction: .on,      seed: 3.4, energy: 0.86),
-              takeB: .init(driftMs: 22, direction: .back,    seed: 6.8, energy: 0.90)),
-        .init(id: 3, name: "VERSE 02",  number: "04", span: 16,
-              takeA: .init(driftMs: 14, direction: .forward, seed: 4.9, energy: 0.60),
-              takeB: .init(driftMs: 5,  direction: .on,      seed: 7.2, energy: 0.57)),
-        .init(id: 4, name: "CHORUS 02", number: "05", span: 16,
-              takeA: .init(driftMs: 26, direction: .back,    seed: 5.6, energy: 0.92),
-              takeB: .init(driftMs: 8,  direction: .forward, seed: 8.4, energy: 0.88)),
-        .init(id: 5, name: "BRIDGE",    number: "06", span: 12,
-              takeA: .init(driftMs: 9,  direction: .on,      seed: 6.1, energy: 0.44),
-              takeB: .init(driftMs: 19, direction: .back,    seed: 9.7, energy: 0.48)),
-        .init(id: 6, name: "CHORUS 03", number: "07", span: 16,
-              takeA: .init(driftMs: 21, direction: .back,    seed: 7.3, energy: 0.94),
-              takeB: .init(driftMs: 12, direction: .forward, seed: 2.2, energy: 0.91)),
-        .init(id: 7, name: "OUTRO",     number: "08", span: 16,
-              takeA: .init(driftMs: 6,  direction: .on,      seed: 8.8, energy: 0.34),
-              takeB: .init(driftMs: 15, direction: .forward, seed: 3.9, energy: 0.38)),
-    ]
-
-    static var totalSpan: Int { defaults.reduce(0) { $0 + $1.span } }
-}
-
 // MARK: - Composite screen
 
 struct TethrCompositeScreen: View {
@@ -88,52 +40,16 @@ struct TethrCompositeScreen: View {
     @ObservedObject var orientationLock: OrientationLockManager
     let isLandscape: Bool
 
-    @State private var route: [TethrTake] = Array(repeating: .A, count: 8)
     @State private var headFrac: Double = 0
     @State private var isPlaying: Bool = false
     @State private var animationTimer: Timer?
     @State private var isBpmSheetPresented: Bool = false
 
-    private let segments = TethrSegmentSeed.defaults
-    private let takeAFile = "MIGHT_AS_WELL_R3.WAV"
-    private let takeBFile = "MIGHT_AS_WELL_R7.WAV"
-    private let takeADetected: Double = 119.6
-    private let takeBDetected: Double = 120.7
+    // MARK: Real composition data
 
-    private var headSegmentIndex: Int {
-        let frac = max(0, min(0.999, headFrac))
-        var acc = 0
-        let total = Double(TethrSegmentSeed.totalSpan)
-        for seg in segments {
-            let next = acc + seg.span
-            if frac < Double(next) / total { return seg.id }
-            acc = next
-        }
-        return segments.count - 1
-    }
-
-    /// playhead position within the currently-active segment, 0...1
-    private var headFractionWithinSegment: Double {
-        let frac = max(0, min(0.999, headFrac))
-        var acc = 0
-        let total = Double(TethrSegmentSeed.totalSpan)
-        for seg in segments {
-            let start = Double(acc) / total
-            let end = Double(acc + seg.span) / total
-            if frac < end {
-                return (frac - start) / max(0.0001, end - start)
-            }
-            acc += seg.span
-        }
-        return 0
-    }
-
-    // MARK: Real composition data (single-track wiring)
-
-    /// Tracks actually loaded into the composition. The paired TAKE A / TAKE B
-    /// comparison only makes sense with two sources; one track is single-column.
     private var loadedSources: [TethrSourceTrack] { viewModel.composition.sources }
-    private var isPaired: Bool { loadedSources.count >= 2 }
+    /// The optional second take. Nil keeps TAKE B an empty (importable) slot.
+    private var takeBSource: TethrSourceTrack? { viewModel.composition.source(in: .alternate) }
     private var realSegments: [TethrSharedSegment] {
         viewModel.composition.sharedSegmentMap?.segments ?? []
     }
@@ -178,6 +94,18 @@ struct TethrCompositeScreen: View {
         return (abs(avgMs), avgMs > 0 ? .forward : .back)
     }
 
+    /// The take currently routed (live) for a segment; defaults to the primary.
+    private func liveSlot(for segment: TethrSharedSegment) -> TethrSourceSlot {
+        guard let id = viewModel.composition.activeSourceID(for: segment.id),
+              let source = viewModel.composition.source(id: id) else { return .primary }
+        return source.slot
+    }
+
+    private func route(_ slot: TethrSourceSlot, for segment: TethrSharedSegment) {
+        guard let source = viewModel.composition.source(in: slot) else { return }
+        viewModel.selectSource(source.id, for: segment.id)
+    }
+
     var body: some View {
         GeometryReader { geo in
             ZStack {
@@ -191,28 +119,20 @@ struct TethrCompositeScreen: View {
                         onOpenBpm: { isBpmSheetPresented = true }
                     )
 
-                    if isPaired {
-                        TethrLaneHeader(
-                            takeAFile: takeAFile,
-                            takeADetected: takeADetected,
-                            takeBFile: takeBFile,
-                            takeBDetected: takeBDetected
-                        )
-                        pairedSegmentList
-                    } else {
-                        TethrSingleLaneHeader(
-                            fileName: viewModel.project.sourceName ?? "—",
-                            bpm: viewModel.currentMasterBpm,
-                            duration: realTotalDuration
-                        )
-                        singleSegmentList
-                    }
+                    TethrLaneHeader(
+                        takeAName: viewModel.project.sourceName ?? "—",
+                        takeABpm: viewModel.currentMasterBpm,
+                        takeADuration: realTotalDuration,
+                        takeB: takeBSource
+                    )
+
+                    segmentList
 
                     TethrCompositeTransport(
                         isPlaying: $isPlaying,
                         headFrac: $headFrac,
                         bpm: viewModel.currentMasterBpm,
-                        totalBars: isPaired ? 116 : realTotalBars,
+                        totalBars: realTotalBars,
                         safeAreaBottom: max(12, geo.safeAreaInsets.bottom),
                         onStop: {
                             isPlaying = false
@@ -242,31 +162,10 @@ struct TethrCompositeScreen: View {
         .onDisappear { stopTicker() }
     }
 
-    // MARK: Segment lists
-
-    private var pairedSegmentList: some View {
-        ScrollView {
-            VStack(spacing: 2) {
-                ForEach(segments) { seg in
-                    TethrSegmentRow(
-                        segment: seg,
-                        live: route[seg.id],
-                        isHead: isPlaying && seg.id == headSegmentIndex,
-                        headFractionInSegment: seg.id == headSegmentIndex ? headFractionWithinSegment : 0,
-                        onSelect: { take in
-                            if route[seg.id] != take { route[seg.id] = take }
-                        }
-                    )
-                    .frame(minHeight: 72)
-                }
-            }
-            .padding(2)
-        }
-        .background(TethrTheme.bg0)
-    }
+    // MARK: Segment list
 
     @ViewBuilder
-    private var singleSegmentList: some View {
+    private var segmentList: some View {
         if realSegments.isEmpty {
             VStack(spacing: 10) {
                 Spacer()
@@ -292,7 +191,7 @@ struct TethrCompositeScreen: View {
                     ScrollView {
                         VStack(spacing: spacing) {
                             ForEach(realSegments) { seg in
-                                singleSegmentRow(seg).frame(height: minRow)
+                                segmentRow(seg).frame(height: minRow)
                             }
                         }
                         .padding(2)
@@ -304,7 +203,7 @@ struct TethrCompositeScreen: View {
                     let rowHeight = min(fit, maxRow)
                     VStack(spacing: spacing) {
                         ForEach(realSegments) { seg in
-                            singleSegmentRow(seg).frame(height: rowHeight)
+                            segmentRow(seg).frame(height: rowHeight)
                         }
                     }
                     .padding(2)
@@ -315,38 +214,64 @@ struct TethrCompositeScreen: View {
         }
     }
 
-    // TAKE A: real loaded track · gutter · TAKE B: empty slot (present in the
-    // layout but no audio data until a second take loads).
+    // TAKE A (primary) · route gutter · TAKE B (real if loaded, else an empty
+    // slot that imports a second take). The live take per segment is routable.
     @ViewBuilder
-    private func singleSegmentRow(_ seg: TethrSharedSegment) -> some View {
+    private func segmentRow(_ seg: TethrSharedSegment) -> some View {
         let drift = driftSummary(for: seg)
         let active = seg.index == activeRealSegmentIndex
+        let live = liveSlot(for: seg)
+        let headFraction = active ? realHeadFraction(in: seg) : 0
+
         HStack(spacing: 2) {
-            TethrSingleTakeCell(
+            TethrRealTakeCell(
                 segment: seg,
+                accent: TethrTheme.cyan,
+                isLive: live == .primary,
                 driftMs: drift.ms,
                 driftDirection: drift.direction,
-                isHead: isPlaying && active,
-                headFraction: active ? realHeadFraction(in: seg) : 0,
-                seed: Double(seg.index) * 1.7
+                isHead: isPlaying && active && live == .primary,
+                headFraction: headFraction,
+                seed: Double(seg.index) * 1.7,
+                onSelect: { route(.primary, for: seg) }
             )
 
             TethrRouteGutter(
                 segmentNumber: String(format: "%02d", seg.index),
-                live: .A,
+                live: live == .alternate ? .B : .A,
                 isHead: isPlaying && active
             )
             .frame(width: 54)
 
-            TethrEmptySlotCell()
+            if takeBSource != nil {
+                TethrRealTakeCell(
+                    segment: seg,
+                    accent: TethrTheme.magenta,
+                    isLive: live == .alternate,
+                    driftMs: drift.ms,
+                    driftDirection: drift.direction,
+                    isHead: isPlaying && active && live == .alternate,
+                    headFraction: headFraction,
+                    seed: Double(seg.index) * 1.7 + 0.9,
+                    onSelect: { route(.alternate, for: seg) }
+                )
+            } else {
+                TethrEmptySlotCell(onTap: {
+                    #if DEBUG
+                    // DEBUG-IMPORT-FIXTURE: deterministic TAKE B for the simulator
+                    // (no Files/Music). Release uses the real picker.
+                    viewModel.importDebugFixture(slot: .alternate)
+                    #else
+                    viewModel.presentImport(slot: .alternate)
+                    #endif
+                })
+            }
         }
     }
 
     private func startTicker() {
         stopTicker()
-        let totalSeconds = isPaired
-            ? Double(TethrSegmentSeed.totalSpan * 4) * 60 / Double(max(1, viewModel.currentMasterBpm))
-            : max(0.5, realTotalDuration)
+        let totalSeconds = max(0.5, realTotalDuration)
         let start = Date()
         let startFrac = headFrac
         animationTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { _ in
@@ -479,69 +404,7 @@ private struct TethrBpmPill: View {
     }
 }
 
-// MARK: - Lane header
-
-private struct TethrLaneHeader: View {
-    let takeAFile: String
-    let takeADetected: Double
-    let takeBFile: String
-    let takeBDetected: Double
-
-    var body: some View {
-        HStack(spacing: 12) {
-            HStack(spacing: 7) {
-                Rectangle()
-                    .fill(TethrTheme.cyan)
-                    .frame(width: 7, height: 7)
-
-                Text("TAKE A")
-                    .font(TethrFont.medium(11))
-                    .tracking(11 * 0.24)
-                    .foregroundStyle(TethrTheme.fg0)
-
-                Text(String(format: "%.1f", takeADetected))
-                    .font(TethrFont.medium(9))
-                    .tracking(9 * 0.12)
-                    .foregroundStyle(TethrTheme.fg3)
-                    .monospacedDigit()
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Text("ROUTE")
-                .font(TethrFont.medium(9))
-                .tracking(9 * 0.3)
-                .foregroundStyle(TethrTheme.fg3)
-
-            HStack(spacing: 7) {
-                Text(String(format: "%.1f", takeBDetected))
-                    .font(TethrFont.medium(9))
-                    .tracking(9 * 0.12)
-                    .foregroundStyle(TethrTheme.fg3)
-                    .monospacedDigit()
-
-                Text("TAKE B")
-                    .font(TethrFont.medium(11))
-                    .tracking(11 * 0.24)
-                    .foregroundStyle(TethrTheme.fg0)
-
-                Rectangle()
-                    .fill(TethrTheme.magenta)
-                    .frame(width: 7, height: 7)
-            }
-            .frame(maxWidth: .infinity, alignment: .trailing)
-        }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 10)
-        .overlay(
-            Rectangle()
-                .fill(TethrTheme.line1)
-                .frame(height: 1),
-            alignment: .bottom
-        )
-    }
-}
-
-// MARK: - Single-track lane header + row (one source loaded)
+// MARK: - Lane header (TAKE A real · TAKE B real or empty)
 
 private func tethrTimecode(_ seconds: TimeInterval) -> String {
     guard seconds.isFinite, seconds > 0 else { return "0:00" }
@@ -549,27 +412,28 @@ private func tethrTimecode(_ seconds: TimeInterval) -> String {
     return String(format: "%d:%02d", total / 60, total % 60)
 }
 
-private struct TethrSingleLaneHeader: View {
-    let fileName: String
-    let bpm: Int
-    let duration: TimeInterval
+private struct TethrLaneHeader: View {
+    let takeAName: String
+    let takeABpm: Int
+    let takeADuration: TimeInterval
+    let takeB: TethrSourceTrack?
 
     var body: some View {
         HStack(spacing: 12) {
-            // TAKE A — real loaded track
+            // TAKE A — primary loaded track
             HStack(spacing: 7) {
                 Rectangle()
                     .fill(TethrTheme.cyan)
                     .frame(width: 7, height: 7)
 
-                Text(fileName)
+                Text(takeAName)
                     .font(TethrFont.medium(11))
                     .tracking(11 * 0.18)
                     .foregroundStyle(TethrTheme.fg0)
                     .lineLimit(1)
                     .truncationMode(.middle)
 
-                Text("\(bpm) · \(tethrTimecode(duration))")
+                Text("\(takeABpm) · \(tethrTimecode(takeADuration))")
                     .font(TethrFont.medium(9))
                     .tracking(9 * 0.12)
                     .foregroundStyle(TethrTheme.fg3)
@@ -582,21 +446,34 @@ private struct TethrSingleLaneHeader: View {
                 .tracking(9 * 0.3)
                 .foregroundStyle(TethrTheme.fg3)
 
-            // TAKE B — empty slot (no track loaded)
+            // TAKE B — real second take, or an empty slot
             HStack(spacing: 7) {
-                Text("EMPTY")
-                    .font(TethrFont.medium(9))
-                    .tracking(9 * 0.18)
-                    .foregroundStyle(TethrTheme.fg4)
+                if let takeB {
+                    Text(takeB.fileName)
+                        .font(TethrFont.medium(11))
+                        .tracking(11 * 0.18)
+                        .foregroundStyle(TethrTheme.fg0)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
 
-                Text("TAKE B")
-                    .font(TethrFont.medium(11))
-                    .tracking(11 * 0.24)
-                    .foregroundStyle(TethrTheme.fg3)
+                    Rectangle()
+                        .fill(TethrTheme.magenta)
+                        .frame(width: 7, height: 7)
+                } else {
+                    Text("EMPTY")
+                        .font(TethrFont.medium(9))
+                        .tracking(9 * 0.18)
+                        .foregroundStyle(TethrTheme.fg4)
 
-                Rectangle()
-                    .fill(TethrTheme.fg4.opacity(0.5))
-                    .frame(width: 7, height: 7)
+                    Text("TAKE B")
+                        .font(TethrFont.medium(11))
+                        .tracking(11 * 0.24)
+                        .foregroundStyle(TethrTheme.fg3)
+
+                    Rectangle()
+                        .fill(TethrTheme.fg4.opacity(0.5))
+                        .frame(width: 7, height: 7)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
         }
@@ -611,159 +488,57 @@ private struct TethrSingleLaneHeader: View {
     }
 }
 
-/// Empty TAKE B slot — present in the layout but deliberately renders no
-/// waveform or segment data until a second take is loaded.
+/// Empty TAKE B slot — renders no waveform/segment data until a second take is
+/// loaded; tapping imports a second take through the same import pipeline.
 private struct TethrEmptySlotCell: View {
-    var body: some View {
-        ZStack {
-            Rectangle()
-                .fill(Color(red: 9 / 255, green: 9 / 255, blue: 11 / 255).opacity(0.5))
+    let onTap: () -> Void
 
-            Text("EMPTY")
-                .font(TethrFont.medium(9))
-                .tracking(9 * 0.24)
-                .foregroundStyle(TethrTheme.fg4)
+    var body: some View {
+        Button(action: onTap) {
+            ZStack {
+                Rectangle()
+                    .fill(Color(red: 9 / 255, green: 9 / 255, blue: 11 / 255).opacity(0.5))
+
+                VStack(spacing: 4) {
+                    Text("EMPTY")
+                        .font(TethrFont.medium(9))
+                        .tracking(9 * 0.24)
+                        .foregroundStyle(TethrTheme.fg4)
+
+                    Text("TAP TO IMPORT")
+                        .font(TethrFont.medium(8))
+                        .tracking(8 * 0.22)
+                        .foregroundStyle(TethrTheme.magenta.opacity(0.7))
+                }
+            }
+            .overlay(
+                Rectangle()
+                    .stroke(TethrTheme.line1, style: StrokeStyle(lineWidth: 1, dash: [4, 5]))
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
         }
-        .overlay(
-            Rectangle()
-                .stroke(TethrTheme.line1, style: StrokeStyle(lineWidth: 1, dash: [4, 5]))
-        )
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .allowsHitTesting(false)
+        .buttonStyle(.plain)
     }
 }
 
-private struct TethrSingleTakeCell: View {
+private struct TethrRealTakeCell: View {
     let segment: TethrSharedSegment
+    let accent: Color
+    let isLive: Bool
     let driftMs: Int
     let driftDirection: TethrDriftDirection
     let isHead: Bool
     let headFraction: Double
     let seed: Double
-
-    var body: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .topLeading) {
-                Rectangle()
-                    .fill(TethrTheme.cyan.opacity(0.04))
-
-                if isHead {
-                    Rectangle()
-                        .fill(TethrTheme.magenta.opacity(0.10))
-                        .allowsHitTesting(false)
-                }
-
-                TethrSynthWaveform(
-                    color: TethrTheme.cyan,
-                    seed: seed,
-                    energy: 0.6,
-                    flat: false,
-                    intensity: 0.6
-                )
-                .padding(.horizontal, 4)
-                .padding(.vertical, 5)
-                .allowsHitTesting(false)
-
-                if isHead {
-                    Rectangle()
-                        .fill(TethrTheme.magenta)
-                        .frame(width: 2)
-                        .shadow(color: TethrTheme.magenta.opacity(0.7), radius: 4)
-                        .offset(x: geo.size.width * headFraction)
-                        .allowsHitTesting(false)
-                }
-
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading) {
-                        Text(segment.label)
-                            .font(TethrFont.medium(12))
-                            .tracking(12 * 0.16)
-                            .foregroundStyle(TethrTheme.fg0)
-
-                        Spacer(minLength: 0)
-
-                        TethrDriftChip(direction: driftDirection, driftMs: driftMs)
-                    }
-
-                    Spacer(minLength: 0)
-
-                    Text(tethrTimecode(segment.duration))
-                        .font(TethrFont.medium(9))
-                        .tracking(9 * 0.12)
-                        .foregroundStyle(TethrTheme.fg3)
-                        .monospacedDigit()
-                }
-                .padding(.horizontal, 11)
-                .padding(.vertical, 8)
-            }
-            .overlay(
-                Rectangle()
-                    .stroke(TethrTheme.cyan, lineWidth: 1)
-            )
-            .contentShape(Rectangle())
-        }
-    }
-}
-
-// MARK: - Segment row (Take A | gutter | Take B)
-
-private struct TethrSegmentRow: View {
-    let segment: TethrSegmentSeed
-    let live: TethrTake
-    let isHead: Bool
-    let headFractionInSegment: Double
-    let onSelect: (TethrTake) -> Void
-
-    var body: some View {
-        HStack(spacing: 2) {
-            TethrTakeCell(
-                segment: segment,
-                take: .A,
-                isLive: live == .A,
-                isHead: isHead,
-                headFraction: live == .A ? headFractionInSegment : 0,
-                onSelect: { onSelect(.A) }
-            )
-
-            TethrRouteGutter(
-                segmentNumber: segment.number,
-                live: live,
-                isHead: isHead
-            )
-            .frame(width: 54)
-
-            TethrTakeCell(
-                segment: segment,
-                take: .B,
-                isLive: live == .B,
-                isHead: isHead,
-                headFraction: live == .B ? headFractionInSegment : 0,
-                onSelect: { onSelect(.B) }
-            )
-        }
-    }
-}
-
-private struct TethrTakeCell: View {
-    let segment: TethrSegmentSeed
-    let take: TethrTake
-    let isLive: Bool
-    let isHead: Bool
-    let headFraction: Double
     let onSelect: () -> Void
-
-    private var takeData: TethrTakeData {
-        take == .A ? segment.takeA : segment.takeB
-    }
-
-    private var accent: Color { take.color }
 
     var body: some View {
         Button(action: { if !isLive { onSelect() } }) {
             GeometryReader { geo in
                 ZStack(alignment: .topLeading) {
                     Rectangle()
-                        .fill(isLive ? accent.opacity(0.04) : Color(red: 9/255, green: 9/255, blue: 11/255).opacity(0.68))
+                        .fill(isLive ? accent.opacity(0.04) : Color(red: 9 / 255, green: 9 / 255, blue: 11 / 255).opacity(0.68))
 
                     if isLive && isHead {
                         Rectangle()
@@ -773,8 +548,8 @@ private struct TethrTakeCell: View {
 
                     TethrSynthWaveform(
                         color: isLive ? accent : TethrTheme.fg3,
-                        seed: takeData.seed,
-                        energy: takeData.energy,
+                        seed: seed,
+                        energy: 0.6,
                         flat: !isLive,
                         intensity: isLive ? 0.6 : 0.12
                     )
@@ -782,7 +557,6 @@ private struct TethrTakeCell: View {
                     .padding(.vertical, 5)
                     .allowsHitTesting(false)
 
-                    // Playhead — only on live + currently-active segment
                     if isLive && isHead {
                         Rectangle()
                             .fill(TethrTheme.magenta)
@@ -792,22 +566,32 @@ private struct TethrTakeCell: View {
                             .allowsHitTesting(false)
                     }
 
-                    VStack(alignment: .leading) {
-                        Text(segment.name)
-                            .font(TethrFont.medium(12))
-                            .tracking(12 * 0.16)
-                            .foregroundStyle(isLive ? TethrTheme.fg0 : TethrTheme.fg2)
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading) {
+                            Text(segment.label)
+                                .font(TethrFont.medium(12))
+                                .tracking(12 * 0.16)
+                                .foregroundStyle(isLive ? TethrTheme.fg0 : TethrTheme.fg2)
+
+                            Spacer(minLength: 0)
+
+                            if isLive {
+                                TethrDriftChip(direction: driftDirection, driftMs: driftMs)
+                            } else {
+                                Text("TAP TO USE")
+                                    .font(TethrFont.medium(9))
+                                    .tracking(9 * 0.16)
+                                    .foregroundStyle(TethrTheme.fg3)
+                            }
+                        }
 
                         Spacer(minLength: 0)
 
-                        if isLive {
-                            TethrDriftChip(direction: takeData.direction, driftMs: takeData.driftMs)
-                        } else {
-                            Text("TAP TO USE")
-                                .font(TethrFont.medium(9))
-                                .tracking(9 * 0.16)
-                                .foregroundStyle(TethrTheme.fg3)
-                        }
+                        Text(tethrTimecode(segment.duration))
+                            .font(TethrFont.medium(9))
+                            .tracking(9 * 0.12)
+                            .foregroundStyle(TethrTheme.fg3)
+                            .monospacedDigit()
                     }
                     .padding(.horizontal, 11)
                     .padding(.vertical, 8)
