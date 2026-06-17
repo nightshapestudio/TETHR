@@ -143,7 +143,6 @@ final class TethrEditorViewModel: ObservableObject {
     func presentImport(slot: TethrSourceSlot = .primary) {
         pendingImportSlot = slot
         isImportPresented = true
-        TethrImportDebug.shared.log("fileImporter opened", "slot=\(slot)") // DEBUG-IMPORT
     }
 
     func cancelImport() {
@@ -155,14 +154,12 @@ final class TethrEditorViewModel: ObservableObject {
     // exact same path as a picker selection. Remove with the fixture feature.
     func importDebugFixture(slot: TethrSourceSlot = .primary) {
         pendingImportSlot = slot
-        TethrImportDebug.shared.log("Fixture import requested", "slot=\(slot)")
         do {
             let url = try TethrDebugFixture.resolveOrCreate()
             handleImport(result: .success(url))
         } catch {
             let message = (error as? LocalizedError)?.errorDescription
                 ?? error.localizedDescription
-            TethrImportDebug.shared.log("Fixture import failed", message)
             importErrorMessage = message
             project.importState = .failed
         }
@@ -194,7 +191,6 @@ final class TethrEditorViewModel: ObservableObject {
                 appScreen = .analyzing
             }
 
-            TethrImportDebug.shared.log("Analyzing audio…", url.lastPathComponent) // DEBUG-IMPORT
             Task {
                 do {
                     let summary = try await audioEngine.importSource(at: url)
@@ -212,11 +208,9 @@ final class TethrEditorViewModel: ObservableObject {
                     project.importState = .loaded
                     project.correctionState = .conservative
                     persistComposition()
-                    TethrImportDebug.shared.log("Import complete", summary.fileName) // DEBUG-IMPORT
                 } catch {
                     let message = (error as? LocalizedError)?.errorDescription
                         ?? error.localizedDescription
-                    TethrImportDebug.shared.log("Import failed", message) // DEBUG-IMPORT
                     Self.logger.error("Import failed for \(url.lastPathComponent, privacy: .public): \(message, privacy: .public)")
                     importErrorMessage = message
                     project.importState = .failed

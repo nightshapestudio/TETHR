@@ -1,5 +1,4 @@
 import AVFoundation
-import Combine // DEBUG-IMPORT
 import Foundation
 import os
 
@@ -143,35 +142,6 @@ struct TethrCompositeExporter {
     }
 }
 
-// DEBUG-IMPORT: Import-stage instrumentation. `log` always writes to os.Logger
-// (invisible to users, queryable in Console). The on-screen status mirror is
-// only updated in DEBUG builds, so shipped users never see it.
-// To remove entirely: delete this block and grep the project for "DEBUG-IMPORT".
-final class TethrImportDebug: ObservableObject, @unchecked Sendable {
-    static let shared = TethrImportDebug()
-    private static let logger = Logger(subsystem: "com.nightshape.tethr", category: "import")
-
-    @Published private(set) var lastStatus = "Idle"
-    @Published private(set) var history: [String] = []
-
-    private init() {}
-
-    /// Safe to call from any thread.
-    func log(_ stage: String, _ detail: String = "") {
-        Self.logger.debug("[\(stage, privacy: .public)] \(detail, privacy: .public)")
-        #if DEBUG
-        let line = detail.isEmpty ? stage : "\(stage) — \(detail)"
-        DispatchQueue.main.async {
-            self.lastStatus = line
-            self.history.append(line)
-            if self.history.count > 14 {
-                self.history.removeFirst(self.history.count - 14)
-            }
-        }
-        #endif
-    }
-}
-
 #if DEBUG
 // DEBUG-IMPORT-FIXTURE: Simulator-only deterministic import fixture.
 // Resolves a user-placed audio file in the app's Documents directory, or
@@ -198,7 +168,6 @@ enum TethrDebugFixture {
         for name in candidateNames {
             let candidate = documentsDirectory.appendingPathComponent(name)
             if FileManager.default.fileExists(atPath: candidate.path) {
-                TethrImportDebug.shared.log("Fixture found", candidate.lastPathComponent)
                 return candidate
             }
         }
@@ -207,7 +176,6 @@ enum TethrDebugFixture {
         if FileManager.default.fileExists(atPath: synthesized.path) {
             return synthesized
         }
-        TethrImportDebug.shared.log("Fixture synthesizing", "120 BPM click, 48s")
         try synthesizeClickTrack(to: synthesized)
         return synthesized
     }
@@ -325,18 +293,14 @@ final class TethrAudioEngine: TethrAudioEngineProtocol {
     }
 
     func importSource(at url: URL) async throws -> TethrSourceSummary {
-        TethrImportDebug.shared.log("importSource start", url.lastPathComponent) // DEBUG-IMPORT
         let playableURL = try copyIntoImportsIfNeeded(url)
-        TethrImportDebug.shared.log("AVURLAsset create", playableURL.lastPathComponent) // DEBUG-IMPORT
         let asset = AVURLAsset(url: playableURL)
         let duration = try await asset.load(.duration).seconds
         let normalizedDuration = duration.isFinite ? duration : 0
-        TethrImportDebug.shared.log("Asset loaded", String(format: "%.2fs", normalizedDuration)) // DEBUG-IMPORT
         let tempoEstimate = tempoAnalyzer.estimateTempo(
             at: playableURL,
             duration: normalizedDuration
         )
-        TethrImportDebug.shared.log("Tempo estimate", tempoEstimate.map { String(format: "%.0f BPM", $0.bpm) } ?? "none") // DEBUG-IMPORT
 
         return TethrSourceSummary(
             fileName: url.lastPathComponent,
@@ -397,7 +361,6 @@ final class TethrAudioEngine: TethrAudioEngineProtocol {
     private func copyIntoImportsIfNeeded(_ url: URL) throws -> URL {
         // Already inside our sandbox import directory: nothing to copy.
         if url.isFileURL, url.path.hasPrefix(importDirectory.path) {
-            TethrImportDebug.shared.log("Already in sandbox", url.lastPathComponent) // DEBUG-IMPORT
             return url
         }
 
@@ -415,7 +378,6 @@ final class TethrAudioEngine: TethrAudioEngineProtocol {
         // the entire read, ask iCloud to materialize evicted items, and use a
         // file coordinator so the copy reads a real, downloaded file.
         let didAccess = url.startAccessingSecurityScopedResource()
-        TethrImportDebug.shared.log("Security scope", didAccess ? "started (true)" : "not needed (false)") // DEBUG-IMPORT
         defer {
             if didAccess {
                 url.stopAccessingSecurityScopedResource()
@@ -423,13 +385,10 @@ final class TethrAudioEngine: TethrAudioEngineProtocol {
         }
 
         let isUbiquitous = (try? url.resourceValues(forKeys: [.isUbiquitousItemKey]))?.isUbiquitousItem == true
-        TethrImportDebug.shared.log("iCloud status", isUbiquitous ? "ubiquitous (iCloud)" : "local") // DEBUG-IMPORT
         if isUbiquitous {
-            TethrImportDebug.shared.log("Copying from iCloud…", url.lastPathComponent) // DEBUG-IMPORT
             try? FileManager.default.startDownloadingUbiquitousItem(at: url)
         }
 
-        TethrImportDebug.shared.log("Coordination started", "destination=\(destination.lastPathComponent)") // DEBUG-IMPORT
         var coordinatorError: NSError?
         var copyError: Error?
         NSFileCoordinator().coordinate(
@@ -460,7 +419,6 @@ final class TethrAudioEngine: TethrAudioEngineProtocol {
             throw TethrImportError.unreadableSource(url)
         }
 
-        TethrImportDebug.shared.log("Copied into TETHR sandbox", destination.path) // DEBUG-IMPORT
         return destination
     }
 

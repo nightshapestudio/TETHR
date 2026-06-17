@@ -22,7 +22,6 @@ struct TethrRootView: View {
         }
         .ignoresSafeArea()
         .background(TethrTheme.bg0)
-        .modifier(TethrImportDebugOverlayModifier()) // DEBUG-IMPORT
         .preferredColorScheme(.dark)
         .fileImporter(
             isPresented: $viewModel.isImportPresented,
@@ -140,63 +139,15 @@ struct TethrRootView: View {
         switch result {
         case .success(let urls):
             guard let url = urls.first else {
-                TethrImportDebug.shared.log("Picker cancelled / empty selection") // DEBUG-IMPORT
                 viewModel.cancelImport()
                 return
             }
-            TethrImportDebug.shared.log("URL received from picker", url.path) // DEBUG-IMPORT
             viewModel.handleImport(result: .success(url))
         case .failure(let error):
-            TethrImportDebug.shared.log("Picker error", error.localizedDescription) // DEBUG-IMPORT
             viewModel.handleImport(result: .failure(error))
         }
     }
 }
-
-// DEBUG-IMPORT: On-screen import status overlay. Compiled out of release builds
-// via the modifier below, so it is never visible to shipped users.
-// To remove entirely: delete this struct, the modifier, and the `.modifier(...)`
-// call in the body (grep "DEBUG-IMPORT").
-private struct TethrImportDebugOverlayModifier: ViewModifier {
-    func body(content: Content) -> some View {
-        #if DEBUG
-        content.overlay(alignment: .bottom) { TethrImportDebugOverlay() }
-        #else
-        content
-        #endif
-    }
-}
-
-#if DEBUG
-private struct TethrImportDebugOverlay: View {
-    @ObservedObject private var debug = TethrImportDebug.shared
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("IMPORT DEBUG")
-                .font(.system(size: 9, weight: .bold, design: .monospaced))
-                .foregroundStyle(.yellow)
-            Text(debug.lastStatus)
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                .foregroundStyle(.white)
-            ForEach(Array(debug.history.suffix(6).enumerated()), id: \.offset) { _, line in
-                Text(line)
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.6))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(8)
-        .background(Color.black.opacity(0.72))
-        .overlay(Rectangle().stroke(.yellow.opacity(0.5), lineWidth: 1))
-        .padding(.horizontal, 8)
-        .padding(.bottom, 36)
-        .allowsHitTesting(false)
-    }
-}
-#endif
 
 // MARK: - Screen stubs (will be replaced by real screens in tasks #5–#10)
 
