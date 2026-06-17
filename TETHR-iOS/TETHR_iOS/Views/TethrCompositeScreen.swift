@@ -114,7 +114,9 @@ struct TethrCompositeScreen: View {
                         bpm: viewModel.currentMasterBpm,
                         orientationLock: orientationLock,
                         safeAreaTop: isLandscape ? 18 : max(50, geo.safeAreaInsets.top + 8),
+                        isExporting: viewModel.exportState == .exporting,
                         onImport: viewModel.returnToEmpty,
+                        onExport: viewModel.exportComposite,
                         onMenu: { /* hook later */ },
                         onOpenBpm: { isBpmSheetPresented = true }
                     )
@@ -160,6 +162,37 @@ struct TethrCompositeScreen: View {
             if playing { startTicker() } else { stopTicker() }
         }
         .onDisappear { stopTicker() }
+        .alert(
+            exportAlertTitle,
+            isPresented: Binding(
+                get: { isExportResult(viewModel.exportState) },
+                set: { if !$0 { viewModel.exportState = .idle } }
+            )
+        ) {
+            Button("OK", role: .cancel) { viewModel.exportState = .idle }
+        } message: {
+            Text(exportAlertMessage)
+        }
+    }
+
+    private func isExportResult(_ state: TethrExportState) -> Bool {
+        switch state {
+        case .success, .failure: return true
+        case .idle, .exporting:  return false
+        }
+    }
+
+    private var exportAlertTitle: String {
+        if case .failure = viewModel.exportState { return "EXPORT FAILED" }
+        return "EXPORTED"
+    }
+
+    private var exportAlertMessage: String {
+        switch viewModel.exportState {
+        case .success(let fileName): return "Saved \(fileName) to TETHR Exports."
+        case .failure(let message):  return message
+        case .idle, .exporting:      return ""
+        }
     }
 
     // MARK: Segment list
@@ -294,7 +327,9 @@ private struct TethrCompositeTopBar: View {
     let bpm: Int
     @ObservedObject var orientationLock: OrientationLockManager
     let safeAreaTop: CGFloat
+    let isExporting: Bool
     let onImport: () -> Void
+    let onExport: () -> Void
     let onMenu: () -> Void
     let onOpenBpm: () -> Void
 
@@ -310,6 +345,17 @@ private struct TethrCompositeTopBar: View {
                 TethrChromeIconButton(action: onImport) {
                     Image(systemName: "arrow.up")
                         .font(.system(size: 13, weight: .semibold))
+                }
+
+                TethrChromeIconButton(action: isExporting ? {} : onExport) {
+                    if isExporting {
+                        ProgressView()
+                            .controlSize(.mini)
+                            .tint(TethrTheme.cyan)
+                    } else {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 13, weight: .semibold))
+                    }
                 }
 
                 TethrChromeIconButton(action: onMenu) {

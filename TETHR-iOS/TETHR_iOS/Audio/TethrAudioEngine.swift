@@ -3,6 +3,146 @@ import Combine // DEBUG-IMPORT
 import Foundation
 import os
 
+// MARK: - Composite export
+
+enum TethrExportError: LocalizedError {
+    case nothingToExport
+    case missingSource
+    case renderFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .nothingToExport: return "There are no segments to export yet."
+        case .missingSource:   return "An audio source for this export is missing."
+        case .renderFailed:    return "TETHR couldn't render the export audio."
+        }
+    }
+}
+
+/// One render instruction: a time range pulled from a specific (already
+/// sandbox-copied) source file. Sendable so it can cross to a background task.
+struct TethrExportSegment: Sendable {
+    let sourceURL: URL
+    let startTime: TimeInterval
+    let duration: TimeInterval
+}
+
+/// Concatenates the selected segment audio into a single WAV in the sandbox.
+/// Pure over Sendable inputs so it can run off the main actor.
+struct TethrCompositeExporter {
+    func export(segments: [TethrExportSegment], referenceURL: URL) throws -> URL {
+        guard !segments.isEmpty else { throw TethrExportError.nothingToExport }
+
+        // Canonical output format taken from the primary source.
+        let reference = try AVAudioFile(forReading: referenceURL)
+        let sampleRate = reference.processingFormat.sampleRate
+        let channels = reference.processingFormat.channelCount
+        guard sampleRate > 0, channels > 0,
+              let outFormat = AVAudioFormat(
+                commonFormat: .pcmFormatFloat32,
+                sampleRate: sampleRate,
+                channels: channels,
+                interleaved: false
+              ) else { throw TethrExportError.renderFailed }
+
+        try FileManager.default.createDirectory(
+            at: TethrStorage.exportsDirectory,
+            withIntermediateDirectories: true
+        )
+        let outURL = TethrStorage.exportsDirectory
+            .appendingPathComponent("TETHR-\(Self.timestamp()).wav")
+
+        let settings: [String: Any] = [
+            AVFormatIDKey: kAudioFormatLinearPCM,
+            AVSampleRateKey: sampleRate,
+            AVNumberOfChannelsKey: channels,
+            AVLinearPCMBitDepthKey: 16,
+            AVLinearPCMIsFloatKey: false,
+            AVLinearPCMIsBigEndianKey: false
+        ]
+        let outFile = try AVAudioFile(
+            forWriting: outURL,
+            settings: settings,
+            commonFormat: .pcmFormatFloat32,
+            interleaved: false
+        )
+
+        var openFiles: [String: AVAudioFile] = [:]
+        for segment in segments {
+            let file: AVAudioFile
+            if let cached = openFiles[segment.sourceURL.path] {
+                file = cached
+            } else {
+                file = try AVAudioFile(forReading: segment.sourceURL)
+                openFiles[segment.sourceURL.path] = file
+            }
+            try append(segment, from: file, to: outFile, outFormat: outFormat)
+        }
+
+        return outURL
+    }
+
+    private func append(
+        _ segment: TethrExportSegment,
+        from file: AVAudioFile,
+        to outFile: AVAudioFile,
+        outFormat: AVAudioFormat
+    ) throws {
+        let inFormat = file.processingFormat
+        let inRate = inFormat.sampleRate
+        guard inRate > 0 else { throw TethrExportError.renderFailed }
+
+        let startFrame = AVAudioFramePosition((segment.startTime * inRate).rounded())
+        let wantedFrames = AVAudioFramePosition((segment.duration * inRate).rounded())
+        let available = file.length - startFrame
+        guard wantedFrames > 0, available > 0 else { return }
+
+        let toRead = AVAudioFrameCount(min(wantedFrames, available))
+        file.framePosition = startFrame
+        guard let inBuffer = AVAudioPCMBuffer(pcmFormat: inFormat, frameCapacity: toRead) else {
+            throw TethrExportError.renderFailed
+        }
+        try file.read(into: inBuffer, frameCount: toRead)
+        guard inBuffer.frameLength > 0 else { return }
+
+        if inFormat == outFormat {
+            try outFile.write(from: inBuffer)
+            return
+        }
+
+        // Sources with a different rate/channel layout are converted to match.
+        guard let converter = AVAudioConverter(from: inFormat, to: outFormat) else {
+            throw TethrExportError.renderFailed
+        }
+        let ratio = outFormat.sampleRate / inRate
+        let capacity = AVAudioFrameCount(Double(inBuffer.frameLength) * ratio) + 1_024
+        guard let outBuffer = AVAudioPCMBuffer(pcmFormat: outFormat, frameCapacity: capacity) else {
+            throw TethrExportError.renderFailed
+        }
+
+        var supplied = false
+        var conversionError: NSError?
+        converter.convert(to: outBuffer, error: &conversionError) { _, status in
+            if supplied {
+                status.pointee = .noDataNow
+                return nil
+            }
+            supplied = true
+            status.pointee = .haveData
+            return inBuffer
+        }
+        if let conversionError { throw conversionError }
+        guard outBuffer.frameLength > 0 else { return }
+        try outFile.write(from: outBuffer)
+    }
+
+    private static func timestamp() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        return formatter.string(from: Date())
+    }
+}
+
 // DEBUG-IMPORT: Import-stage instrumentation. `log` always writes to os.Logger
 // (invisible to users, queryable in Console). The on-screen status mirror is
 // only updated in DEBUG builds, so shipped users never see it.

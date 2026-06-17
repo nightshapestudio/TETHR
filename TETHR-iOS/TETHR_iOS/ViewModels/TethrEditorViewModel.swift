@@ -9,6 +9,13 @@ enum AppScreen: Equatable {
     case export
 }
 
+enum TethrExportState: Equatable {
+    case idle
+    case exporting
+    case success(fileName: String)
+    case failure(message: String)
+}
+
 @MainActor
 final class TethrEditorViewModel: ObservableObject {
     @Published private(set) var appScreen: AppScreen = .launch
@@ -18,6 +25,7 @@ final class TethrEditorViewModel: ObservableObject {
     @Published private(set) var isPlaying = false
     @Published var isImportPresented = false
     @Published var importErrorMessage: String?
+    @Published var exportState: TethrExportState = .idle
 
     private static let logger = Logger(subsystem: "com.nightshape.tethr", category: "import")
     private let bpmRange = 60...200
@@ -324,6 +332,43 @@ final class TethrEditorViewModel: ObservableObject {
         composition.selectSource(sourceID, for: segmentID)
         refreshCompositePlan()
         persistComposition()
+    }
+
+    // MARK: - Export
+
+    /// Renders the current TAKE A/B routing into a single WAV in the sandbox.
+    func exportComposite() {
+        guard exportState != .exporting else { return }
+
+        guard let map = composition.sharedSegmentMap, !map.segments.isEmpty,
+              let primary = composition.source(in: .primary) ?? composition.sources.first,
+              let referenceURL = primary.originalURL else {
+            exportState = .failure(message: TethrExportError.nothingToExport.errorDescription ?? "Nothing to export")
+            return
+        }
+
+        // Build a Sendable render plan on the main actor (selected source per
+        // segment, in timeline order) so rendering can run off-main.
+        let plan: [TethrExportSegment] = map.segments
+            .sorted { $0.index < $1.index }
+            .map { segment in
+                let sourceID = composition.activeSourceID(for: segment.id) ?? primary.id
+                let url = (composition.source(id: sourceID) ?? primary).originalURL ?? referenceURL
+                return TethrExportSegment(sourceURL: url, startTime: segment.startTime, duration: segment.duration)
+            }
+
+        exportState = .exporting
+        Task {
+            do {
+                let outURL = try await Task.detached(priority: .userInitiated) {
+                    try TethrCompositeExporter().export(segments: plan, referenceURL: referenceURL)
+                }.value
+                exportState = .success(fileName: outURL.lastPathComponent)
+            } catch {
+                let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                exportState = .failure(message: message)
+            }
+        }
     }
 
     private func analyzeSharedSegmentsIfReady() async {

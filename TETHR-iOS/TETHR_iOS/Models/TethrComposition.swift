@@ -238,6 +238,10 @@ enum TethrStorage {
         documentsDirectory.appendingPathComponent("TETHR Imports", isDirectory: true)
     }
 
+    static var exportsDirectory: URL {
+        documentsDirectory.appendingPathComponent("TETHR Exports", isDirectory: true)
+    }
+
     static var compositionFile: URL {
         documentsDirectory.appendingPathComponent("tethr-composition.json")
     }
