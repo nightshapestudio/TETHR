@@ -1,4 +1,37 @@
 import SwiftUI
+import UIKit
+import UniformTypeIdentifiers
+
+/// Presents the system "Save to…" picker so the user chooses where the rendered
+/// export file is copied (Files, iCloud Drive, etc.). The sandbox copy remains.
+struct TethrDocumentExporter: UIViewControllerRepresentable {
+    let url: URL
+    let onDismiss: () -> Void
+
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        let picker = UIDocumentPickerViewController(forExporting: [url], asCopy: true)
+        picker.shouldShowFileExtensions = true
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ controller: UIDocumentPickerViewController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(onDismiss: onDismiss) }
+
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let onDismiss: () -> Void
+        init(onDismiss: @escaping () -> Void) { self.onDismiss = onDismiss }
+
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            onDismiss()
+        }
+
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+            onDismiss()
+        }
+    }
+}
 
 // MARK: - Take / drift display types
 
@@ -41,6 +74,7 @@ struct TethrCompositeScreen: View {
     let isLandscape: Bool
 
     @State private var isBpmSheetPresented: Bool = false
+    @State private var isExportSheetPresented: Bool = false
 
     // Playback state lives on the view model (real audio), not the view.
     private var isPlaying: Bool { viewModel.isPlaying }
@@ -117,8 +151,7 @@ struct TethrCompositeScreen: View {
                         safeAreaTop: isLandscape ? 18 : max(50, geo.safeAreaInsets.top + 8),
                         isExporting: viewModel.exportState == .exporting,
                         onImport: viewModel.returnToEmpty,
-                        onExport: viewModel.exportComposite,
-                        onMenu: { /* hook later */ },
+                        onExport: { isExportSheetPresented = true },
                         onOpenBpm: { isBpmSheetPresented = true }
                     )
 
@@ -156,39 +189,47 @@ struct TethrCompositeScreen: View {
                     )
                     .transition(.opacity)
                 }
+
+                if isExportSheetPresented {
+                    TethrExportSheet(
+                        onSelect: { format in
+                            isExportSheetPresented = false
+                            viewModel.exportComposite(format: format)
+                        },
+                        onCancel: { isExportSheetPresented = false }
+                    )
+                    .transition(.opacity)
+                }
             }
         }
         .alert(
-            exportAlertTitle,
+            "EXPORT FAILED",
             isPresented: Binding(
-                get: { isExportResult(viewModel.exportState) },
+                get: { if case .failure = viewModel.exportState { return true }; return false },
                 set: { if !$0 { viewModel.exportState = .idle } }
             )
         ) {
             Button("OK", role: .cancel) { viewModel.exportState = .idle }
         } message: {
-            Text(exportAlertMessage)
+            Text(exportFailureMessage)
+        }
+        // After rendering, let the user choose where to save the file.
+        .sheet(
+            isPresented: Binding(
+                get: { viewModel.exportedFileURL != nil },
+                set: { if !$0 { viewModel.exportedFileURL = nil } }
+            )
+        ) {
+            if let url = viewModel.exportedFileURL {
+                TethrDocumentExporter(url: url) { viewModel.exportedFileURL = nil }
+                    .ignoresSafeArea()
+            }
         }
     }
 
-    private func isExportResult(_ state: TethrExportState) -> Bool {
-        switch state {
-        case .success, .failure: return true
-        case .idle, .exporting:  return false
-        }
-    }
-
-    private var exportAlertTitle: String {
-        if case .failure = viewModel.exportState { return "EXPORT FAILED" }
-        return "EXPORTED"
-    }
-
-    private var exportAlertMessage: String {
-        switch viewModel.exportState {
-        case .success(let fileName): return "Saved \(fileName) to TETHR Exports."
-        case .failure(let message):  return message
-        case .idle, .exporting:      return ""
-        }
+    private var exportFailureMessage: String {
+        if case .failure(let message) = viewModel.exportState { return message }
+        return ""
     }
 
     // MARK: Segment list
@@ -309,7 +350,6 @@ private struct TethrCompositeTopBar: View {
     let isExporting: Bool
     let onImport: () -> Void
     let onExport: () -> Void
-    let onMenu: () -> Void
     let onOpenBpm: () -> Void
 
     var body: some View {
@@ -330,7 +370,7 @@ private struct TethrCompositeTopBar: View {
                         .font(.system(size: 13, weight: .semibold))
                 }
 
-                // EXPORT — the console's output control: cyan-accented + glow.
+                // EXPORT — the console's output control (cyan-accented).
                 TethrChromeIconButton(accent: TethrTheme.cyan, isAccented: true, action: isExporting ? {} : onExport) {
                     if isExporting {
                         ProgressView()
@@ -340,11 +380,6 @@ private struct TethrCompositeTopBar: View {
                         Image(systemName: "square.and.arrow.up")
                             .font(.system(size: 13, weight: .semibold))
                     }
-                }
-
-                TethrChromeIconButton(action: onMenu) {
-                    Image(systemName: "line.3.horizontal")
-                        .font(.system(size: 13, weight: .semibold))
                 }
             }
 
@@ -399,11 +434,10 @@ private struct TethrChromeIconButton<Label: View>: View {
                 .background(Color(red: 16 / 255, green: 16 / 255, blue: 22 / 255))
                 .overlay(
                     Rectangle().stroke(
-                        isAccented ? accent.opacity(0.62) : TethrTheme.line2,
+                        isAccented ? accent.opacity(0.7) : TethrTheme.line2,
                         lineWidth: 1
                     )
                 )
-                .shadow(color: accent.opacity(isAccented ? 0.30 : 0), radius: 5)
         }
         .buttonStyle(.plain)
     }
@@ -724,6 +758,106 @@ private struct TethrRouteMarker: View {
             .foregroundStyle(live.color)
             .rotationEffect(live == .A ? .degrees(180) : .zero)
             .shadow(color: live.color.opacity(0.5), radius: 4)
+    }
+}
+
+// MARK: - Export format sheet
+
+struct TethrExportSheet: View {
+    let onSelect: (TethrExportFormat) -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.78)
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture(perform: onCancel)
+
+            VStack {
+                Spacer(minLength: 0)
+                card
+            }
+            .ignoresSafeArea(edges: .bottom)
+        }
+        .transition(.opacity)
+    }
+
+    private var card: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("EXPORT COMPOSITE")
+                    .font(TethrFont.medium(13))
+                    .tracking(13 * 0.3)
+                    .foregroundStyle(TethrTheme.fg0)
+
+                Spacer()
+
+                Button(action: onCancel) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(TethrTheme.fg2)
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+            }
+
+            VStack(spacing: 8) {
+                ForEach(TethrExportFormat.allCases) { format in
+                    Button { onSelect(format) } label: { formatRow(format) }
+                        .buttonStyle(.plain)
+                }
+            }
+
+            Text("AAC IS THE iOS-NATIVE COMPRESSED FORMAT \u{2014} THERE IS NO ON-DEVICE MP3 ENCODER.")
+                .font(TethrFont.medium(8))
+                .tracking(8 * 0.18)
+                .foregroundStyle(TethrTheme.fg4)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(24)
+        .padding(.bottom, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(TethrTheme.bg1)
+        .overlay(
+            Rectangle().stroke(TethrTheme.line2, lineWidth: 1),
+            alignment: .top
+        )
+    }
+
+    private func formatRow(_ format: TethrExportFormat) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(format.title)
+                    .font(TethrFont.bold(14))
+                    .tracking(14 * 0.12)
+                    .foregroundStyle(TethrTheme.fg0)
+
+                Text(format.subtitle)
+                    .font(TethrFont.medium(9))
+                    .tracking(9 * 0.2)
+                    .foregroundStyle(TethrTheme.fg3)
+            }
+
+            Spacer(minLength: 8)
+
+            Text(".\(format.fileExtension.uppercased())")
+                .font(TethrFont.medium(10))
+                .tracking(10 * 0.12)
+                .foregroundStyle(TethrTheme.cyan.opacity(0.82))
+                .monospacedDigit()
+
+            Text("\u{203A}")
+                .font(TethrFont.bold(16))
+                .foregroundStyle(TethrTheme.cyan.opacity(0.7))
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 58)
+        .frame(maxWidth: .infinity)
+        .background(TethrTheme.cyan.opacity(0.03))
+        .overlay(Rectangle().stroke(TethrTheme.line2, lineWidth: 1))
+        .overlay(TethrCornerMarks(color: TethrTheme.cyan, opacity: 0.3, length: 10))
+        .contentShape(Rectangle())
     }
 }
 

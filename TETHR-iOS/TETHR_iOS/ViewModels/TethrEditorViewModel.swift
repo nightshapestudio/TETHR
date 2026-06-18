@@ -12,7 +12,6 @@ enum AppScreen: Equatable {
 enum TethrExportState: Equatable {
     case idle
     case exporting
-    case success(fileName: String)
     case failure(message: String)
 }
 
@@ -26,6 +25,8 @@ final class TethrEditorViewModel: ObservableObject {
     @Published var isImportPresented = false
     @Published var importErrorMessage: String?
     @Published var exportState: TethrExportState = .idle
+    /// Set when a render finishes; drives the "save to…" destination picker.
+    @Published var exportedFileURL: URL?
 
     private static let logger = Logger(subsystem: "com.nightshape.tethr", category: "import")
     private let bpmRange = 60...200
@@ -339,8 +340,9 @@ final class TethrEditorViewModel: ObservableObject {
 
     // MARK: - Export
 
-    /// Renders the current TAKE A/B routing into a single WAV in the sandbox.
-    func exportComposite() {
+    /// Renders the current TAKE A/B routing into a single file in the sandbox,
+    /// in the requested format (WAV 16/24-bit lossless, or M4A/AAC).
+    func exportComposite(format: TethrExportFormat) {
         guard exportState != .exporting else { return }
 
         guard let map = composition.sharedSegmentMap, !map.segments.isEmpty,
@@ -364,9 +366,10 @@ final class TethrEditorViewModel: ObservableObject {
         Task {
             do {
                 let outURL = try await Task.detached(priority: .userInitiated) {
-                    try TethrCompositeExporter().export(segments: plan, referenceURL: referenceURL)
+                    try TethrCompositeExporter().export(segments: plan, referenceURL: referenceURL, format: format)
                 }.value
-                exportState = .success(fileName: outURL.lastPathComponent)
+                exportState = .idle
+                exportedFileURL = outURL // presents the destination picker
             } catch {
                 let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
                 exportState = .failure(message: message)

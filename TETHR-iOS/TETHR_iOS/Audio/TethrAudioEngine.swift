@@ -26,10 +26,79 @@ struct TethrExportSegment: Sendable {
     let duration: TimeInterval
 }
 
-/// Concatenates the selected segment audio into a single WAV in the sandbox.
+/// Output container/codec for an export. All native to AVFoundation — iOS has
+/// no built-in MP3 encoder, so the compressed option is AAC in an MPEG-4 (M4A).
+enum TethrExportFormat: String, CaseIterable, Sendable, Identifiable {
+    case wav24
+    case wav16
+    case m4a
+
+    var id: String { rawValue }
+
+    var fileExtension: String {
+        switch self {
+        case .wav16, .wav24: return "wav"
+        case .m4a:           return "m4a"
+        }
+    }
+
+    /// Short label, e.g. "WAV" / "M4A".
+    var title: String {
+        switch self {
+        case .wav16, .wav24: return "WAV"
+        case .m4a:           return "M4A"
+        }
+    }
+
+    /// Detail line, e.g. "24-BIT · LOSSLESS".
+    var subtitle: String {
+        switch self {
+        case .wav24: return "24-BIT \u{00B7} LOSSLESS"
+        case .wav16: return "16-BIT \u{00B7} LOSSLESS"
+        case .m4a:   return "AAC \u{00B7} 256 KBPS"
+        }
+    }
+
+    func outputSettings(sampleRate: Double, channels: AVAudioChannelCount) -> [String: Any] {
+        switch self {
+        case .wav16:
+            return [
+                AVFormatIDKey: kAudioFormatLinearPCM,
+                AVSampleRateKey: sampleRate,
+                AVNumberOfChannelsKey: channels,
+                AVLinearPCMBitDepthKey: 16,
+                AVLinearPCMIsFloatKey: false,
+                AVLinearPCMIsBigEndianKey: false
+            ]
+        case .wav24:
+            return [
+                AVFormatIDKey: kAudioFormatLinearPCM,
+                AVSampleRateKey: sampleRate,
+                AVNumberOfChannelsKey: channels,
+                AVLinearPCMBitDepthKey: 24,
+                AVLinearPCMIsFloatKey: false,
+                AVLinearPCMIsBigEndianKey: false
+            ]
+        case .m4a:
+            return [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVSampleRateKey: sampleRate,
+                AVNumberOfChannelsKey: channels,
+                AVEncoderBitRateKey: 256_000,
+                AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
+            ]
+        }
+    }
+}
+
+/// Concatenates the selected segment audio into a single file in the sandbox.
 /// Pure over Sendable inputs so it can run off the main actor.
 struct TethrCompositeExporter {
-    func export(segments: [TethrExportSegment], referenceURL: URL) throws -> URL {
+    func export(
+        segments: [TethrExportSegment],
+        referenceURL: URL,
+        format: TethrExportFormat
+    ) throws -> URL {
         guard !segments.isEmpty else { throw TethrExportError.nothingToExport }
 
         // Canonical output format taken from the primary source.
@@ -49,19 +118,11 @@ struct TethrCompositeExporter {
             withIntermediateDirectories: true
         )
         let outURL = TethrStorage.exportsDirectory
-            .appendingPathComponent("TETHR-\(Self.timestamp()).wav")
+            .appendingPathComponent("TETHR-\(Self.timestamp()).\(format.fileExtension)")
 
-        let settings: [String: Any] = [
-            AVFormatIDKey: kAudioFormatLinearPCM,
-            AVSampleRateKey: sampleRate,
-            AVNumberOfChannelsKey: channels,
-            AVLinearPCMBitDepthKey: 16,
-            AVLinearPCMIsFloatKey: false,
-            AVLinearPCMIsBigEndianKey: false
-        ]
         let outFile = try AVAudioFile(
             forWriting: outURL,
-            settings: settings,
+            settings: format.outputSettings(sampleRate: sampleRate, channels: channels),
             commonFormat: .pcmFormatFloat32,
             interleaved: false
         )
@@ -180,12 +241,16 @@ enum TethrDebugFixture {
         return synthesized
     }
 
-    /// Writes a mono 44.1kHz WAV containing a 120-BPM click track (8 seconds),
-    /// so the tempo analyzer has a clear, repeatable onset pattern to detect.
+    /// Writes a mono 44.1kHz, 120-BPM WAV with four distinct 8-bar sections
+    /// (INTRO / DROP / BREAK / OUTRO) over a steady click track. The clicks give
+    /// the tempo analyzer a clean onset grid; the per-section energy/spectral
+    /// contrast gives the structure detector real boundaries to find.
     private static func synthesizeClickTrack(to url: URL) throws {
         let sampleRate = 44_100.0
-        let seconds = 48.0 // ~4 analyzer segments (12s each), fills the list
         let bpm = 120.0
+        let secondsPerBar = 60.0 / bpm * 4.0
+        let sectionSeconds = secondsPerBar * 8.0          // 8 bars per section
+        let seconds = sectionSeconds * 4.0                // four sections
         let totalFrames = AVAudioFrameCount(sampleRate * seconds)
 
         let settings: [String: Any] = [
@@ -215,16 +280,32 @@ enum TethrDebugFixture {
         let framesPerBeat = sampleRate * 60.0 / bpm
         let clickFrames = Int(sampleRate * 0.04) // 40ms transient
         let clickHz = 1_000.0
+        let framesPerSection = sectionSeconds * sampleRate
+
+        // Per-section bed: (click level, sustained tone Hz, tone level).
+        // INTRO: clicks only · DROP: loud sub-bass · BREAK: quiet · OUTRO: mid tone.
+        let beds: [(click: Double, toneHz: Double, tone: Double)] = [
+            (0.45, 0, 0.0),
+            (0.6, 55, 0.5),
+            (0.25, 0, 0.0),
+            (0.5, 330, 0.28)
+        ]
 
         for frame in 0..<Int(totalFrames) {
+            let section = min(beds.count - 1, Int(Double(frame) / framesPerSection))
+            let bed = beds[section]
+
+            var value = 0.0
             let positionInBeat = Double(frame).truncatingRemainder(dividingBy: framesPerBeat)
             if positionInBeat < Double(clickFrames) {
                 let t = positionInBeat / sampleRate
-                let envelope = 1.0 - (positionInBeat / Double(clickFrames)) // linear decay
-                samples[frame] = Float(sin(2.0 * .pi * clickHz * t) * envelope * 0.9)
-            } else {
-                samples[frame] = 0
+                let envelope = 1.0 - (positionInBeat / Double(clickFrames))
+                value += sin(2.0 * .pi * clickHz * t) * envelope * bed.click
             }
+            if bed.tone > 0 {
+                value += sin(2.0 * .pi * bed.toneHz * (Double(frame) / sampleRate)) * bed.tone
+            }
+            samples[frame] = Float(max(-1.0, min(1.0, value)))
         }
 
         let file = try AVAudioFile(
