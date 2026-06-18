@@ -54,31 +54,53 @@ struct TethrBeatMarker: Identifiable, Equatable {
     }
 }
 
+// MARK: - Diff 1: barStart / barEnd / displayLabel / barRangeDisplay
+
 struct TethrSharedSegment: Identifiable, Equatable {
     let id: UUID
     var index: Int
     var startTime: TimeInterval
     var duration: TimeInterval
     var label: String
+    var barStart: Int?       // first bar of this segment (1-based), nil if grid unknown
+    var barEnd: Int?         // last bar of this segment (inclusive), nil if grid unknown
 
     init(
         id: UUID = UUID(),
         index: Int,
         startTime: TimeInterval,
         duration: TimeInterval,
-        label: String
+        label: String,
+        barStart: Int? = nil,
+        barEnd: Int? = nil
     ) {
         self.id = id
         self.index = index
         self.startTime = startTime
         self.duration = duration
         self.label = label
+        self.barStart = barStart
+        self.barEnd = barEnd
     }
 
     var endTime: TimeInterval {
         startTime + duration
     }
+
+    /// Always returns neutral NIGHTSHAPE label regardless of stored `label` value.
+    /// Use this in all UI. Do not use `label` directly in views.
+    var displayLabel: String {
+        String(format: "SEGMENT %02d", index)
+    }
+
+    /// Returns bar range string if grid data is available, e.g. "BARS 001–009"
+    var barRangeDisplay: String? {
+        guard let s = barStart, let e = barEnd else { return nil }
+        return String(format: "BARS %03d–%03d", s, e)
+    }
 }
+
+// MARK: - Diff 2: beatsPerBar / barDuration
 
 struct TethrSharedSegmentMap: Equatable {
     let id: UUID
@@ -87,6 +109,7 @@ struct TethrSharedSegmentMap: Equatable {
     var beatMarkers: [TethrBeatMarker]
     var detectedBpm: Double?
     var confidence: Double
+    var beatsPerBar: Int     // always 4 unless time-signature detection is added later
 
     init(
         id: UUID = UUID(),
@@ -94,7 +117,8 @@ struct TethrSharedSegmentMap: Equatable {
         segments: [TethrSharedSegment],
         beatMarkers: [TethrBeatMarker] = [],
         detectedBpm: Double? = nil,
-        confidence: Double = 0
+        confidence: Double = 0,
+        beatsPerBar: Int = 4
     ) {
         self.id = id
         self.sourceIDs = sourceIDs
@@ -102,6 +126,13 @@ struct TethrSharedSegmentMap: Equatable {
         self.beatMarkers = beatMarkers
         self.detectedBpm = detectedBpm
         self.confidence = confidence
+        self.beatsPerBar = beatsPerBar
+    }
+
+    /// Duration of one bar in seconds. Nil if BPM is unknown.
+    var barDuration: TimeInterval? {
+        guard let bpm = detectedBpm, bpm > 0 else { return nil }
+        return (60.0 / bpm) * Double(beatsPerBar)
     }
 }
 
@@ -261,12 +292,16 @@ struct TethrCompositionSnapshot: Codable {
         var bpmConfidence: Double?
     }
 
+    // MARK: - Diff 3: barStart / barEnd in Segment snapshot
+
     struct Segment: Codable {
         var id: UUID
         var index: Int
         var startTime: TimeInterval
         var duration: TimeInterval
         var label: String
+        var barStart: Int?   // optional — missing key in old saves decodes as nil
+        var barEnd: Int?
     }
 
     struct BeatMarker: Codable {
@@ -282,6 +317,8 @@ struct TethrCompositionSnapshot: Codable {
     var beatMarkers: [BeatMarker]
     var segmentDetectedBpm: Double?
     var segmentConfidence: Double
+    // MARK: - Diff 6: beatsPerBar in snapshot (optional so old saves decode as nil → default 4)
+    var segmentBeatsPerBar: Int?
     var selections: [String: UUID] // segmentID.uuidString -> sourceID
     var masterBpm: Int?
     var isMasterBpmManual: Bool
@@ -310,14 +347,24 @@ struct TethrCompositionSnapshot: Codable {
         guard !sources.isEmpty else { return nil }
 
         let map = composition.sharedSegmentMap
+        // MARK: - Diff 4: include barStart / barEnd in snapshot init
         segments = map?.segments.map {
-            Segment(id: $0.id, index: $0.index, startTime: $0.startTime, duration: $0.duration, label: $0.label)
+            Segment(
+                id: $0.id,
+                index: $0.index,
+                startTime: $0.startTime,
+                duration: $0.duration,
+                label: $0.label,
+                barStart: $0.barStart,
+                barEnd: $0.barEnd
+            )
         } ?? []
         beatMarkers = map?.beatMarkers.map {
             BeatMarker(id: $0.id, beatIndex: $0.beatIndex, detectedTime: $0.detectedTime, confidence: $0.confidence)
         } ?? []
         segmentDetectedBpm = map?.detectedBpm
         segmentConfidence = map?.confidence ?? 0
+        segmentBeatsPerBar = map?.beatsPerBar   // Diff 6
         selections = Dictionary(uniqueKeysWithValues: composition.selectionsBySegmentID.map { ($0.key.uuidString, $0.value) })
 
         masterBpm = project.masterBpm
@@ -353,10 +400,20 @@ struct TethrCompositionSnapshot: Codable {
         var composition = TethrCompositionState()
         composition.sources = tracks
 
+        // MARK: - Diff 5: thread barStart / barEnd through restore
         let restoredSegments = segments.map {
-            TethrSharedSegment(id: $0.id, index: $0.index, startTime: $0.startTime, duration: $0.duration, label: $0.label)
+            TethrSharedSegment(
+                id: $0.id,
+                index: $0.index,
+                startTime: $0.startTime,
+                duration: $0.duration,
+                label: $0.label,
+                barStart: $0.barStart,
+                barEnd: $0.barEnd
+            )
         }
         if !restoredSegments.isEmpty {
+            // Diff 6: restore beatsPerBar, fall back to 4 for old saves
             composition.sharedSegmentMap = TethrSharedSegmentMap(
                 sourceIDs: tracks.map(\.id),
                 segments: restoredSegments,
@@ -364,7 +421,8 @@ struct TethrCompositionSnapshot: Codable {
                     TethrBeatMarker(id: $0.id, beatIndex: $0.beatIndex, detectedTime: $0.detectedTime, confidence: $0.confidence)
                 },
                 detectedBpm: segmentDetectedBpm,
-                confidence: segmentConfidence
+                confidence: segmentConfidence,
+                beatsPerBar: segmentBeatsPerBar ?? 4
             )
             var restoredSelections: [TethrSharedSegment.ID: TethrSourceTrack.ID] = [:]
             for (key, sourceID) in selections {
