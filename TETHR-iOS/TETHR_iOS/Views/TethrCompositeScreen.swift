@@ -650,11 +650,19 @@ private struct TethrRealTakeCell: View {
                     }
 
                     HStack(alignment: .top) {
-                        VStack(alignment: .leading) {
-                            Text(segment.label)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(segment.displayLabel)
                                 .font(TethrFont.medium(12))
                                 .tracking(12 * 0.16)
                                 .foregroundStyle(isLive ? TethrTheme.fg0 : TethrTheme.fg2)
+
+                            if let bars = segment.barRangeDisplay {
+                                Text(bars)
+                                    .font(TethrFont.medium(8))
+                                    .tracking(8 * 0.18)
+                                    .foregroundStyle(TethrTheme.fg3.opacity(0.85))
+                                    .monospacedDigit()
+                            }
 
                             Spacer(minLength: 0)
 
@@ -670,9 +678,9 @@ private struct TethrRealTakeCell: View {
 
                         Spacer(minLength: 0)
 
-                        Text(tethrTimecode(segment.duration))
+                        Text("\(tethrTimecode(segment.startTime))–\(tethrTimecode(segment.endTime))")
                             .font(TethrFont.medium(9))
-                            .tracking(9 * 0.12)
+                            .tracking(9 * 0.1)
                             .foregroundStyle(TethrTheme.fg3)
                             .monospacedDigit()
                     }

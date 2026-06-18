@@ -29,9 +29,10 @@ enum TethrTheme {
     static let periHi = Color(red: 110 / 255, green: 126 / 255, blue: 255 / 255)
     static let periLo = Color(red: 47 / 255, green: 62 / 255, blue: 168 / 255)
     static let violet = Color(red: 143 / 255, green: 92 / 255, blue: 255 / 255)
-    static let magenta = Color(red: 166 / 255, green: 77 / 255, blue: 255 / 255)
-    static let magentaHi = Color(red: 190 / 255, green: 125 / 255, blue: 255 / 255)
-    static let magentaLo = Color(red: 108 / 255, green: 46 / 255, blue: 179 / 255)
+    // TAKE B identity = NIGHTSHAPE Purple #9933FF (palette-compliant; never warm magenta).
+    static let magenta = Color(red: 153 / 255, green: 51 / 255, blue: 255 / 255)
+    static let magentaHi = Color(red: 178 / 255, green: 110 / 255, blue: 255 / 255)
+    static let magentaLo = Color(red: 102 / 255, green: 34 / 255, blue: 170 / 255)
     static let electricPurple = Color(red: 192 / 255, green: 61 / 255, blue: 255 / 255)
     static let danger = Color(red: 242 / 255, green: 107 / 255, blue: 122 / 255)
 
