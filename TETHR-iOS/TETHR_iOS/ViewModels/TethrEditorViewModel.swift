@@ -324,12 +324,51 @@ final class TethrEditorViewModel: ObservableObject {
             detectedBpm: summary.tempoEstimate?.bpm,
             bpmConfidence: summary.tempoEstimate?.confidence
         )
-        composition.upsertSource(source)
-        project.segmentCount = composition.sharedSegmentMap?.segments.count ?? 0
 
-        Task {
-            await analyzeSharedSegmentsIfReady()
+        if slot == .alternate {
+            // TAKE B must NOT wipe the segment map built from TAKE A. Preserve the
+            // shared map + routing across the upsert (which clears analysis for a
+            // source the map doesn't yet know about) and rebuild source IDs.
+            registerAlternateSource(source)
+        } else {
+            // TAKE A (re)import rebuilds structure from scratch.
+            composition.upsertSource(source)
+            project.segmentCount = composition.sharedSegmentMap?.segments.count ?? 0
+            Task { await analyzeSharedSegmentsIfReady() }
         }
+    }
+
+    /// Adds/replaces TAKE B while keeping the existing shared segment map and
+    /// per-segment routing intact (no re-analysis — sections come from TAKE A).
+    private func registerAlternateSource(_ source: TethrSourceTrack) {
+        let savedMap = composition.sharedSegmentMap
+        let savedSelections = composition.selectionsBySegmentID
+        let previousAlternateID = composition.source(in: .alternate)?.id
+
+        composition.upsertSource(source) // may clearSharedAnalysis() for the new ID
+
+        if composition.sharedSegmentMap == nil, var map = savedMap {
+            // upsert cleared it — restore, rebuilding source IDs from current sources.
+            map.sourceIDs = composition.sources.map(\.id)
+            composition.sharedSegmentMap = map
+
+            var selections = savedSelections
+            if let previousAlternateID, previousAlternateID != source.id {
+                // Remap routing from the replaced TAKE B source to the new one.
+                for (segmentID, sourceID) in selections where sourceID == previousAlternateID {
+                    selections[segmentID] = source.id
+                }
+            }
+            composition.selectionsBySegmentID = selections
+        } else if var map = composition.sharedSegmentMap {
+            // Map survived — just keep its source IDs current.
+            map.sourceIDs = composition.sources.map(\.id)
+            composition.sharedSegmentMap = map
+        }
+
+        project.segmentCount = composition.sharedSegmentMap?.segments.count ?? 0
+        refreshCompositePlan()
+        persistComposition()
     }
 
     func selectSource(_ sourceID: TethrSourceTrack.ID, for segmentID: TethrSharedSegment.ID) {
