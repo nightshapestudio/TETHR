@@ -1,19 +1,41 @@
 import Foundation
+import os
+
+enum AppScreen: Equatable {
+    case launch
+    case empty
+    case analyzing
+    case composite
+    case export
+}
+
+enum TethrExportState: Equatable {
+    case idle
+    case exporting
+    case failure(message: String)
+}
 
 @MainActor
 final class TethrEditorViewModel: ObservableObject {
+    @Published private(set) var appScreen: AppScreen = .launch
     @Published private(set) var project = TethrProject()
     @Published private(set) var composition = TethrCompositionState()
     @Published private(set) var playheadProgress: Double = 0
     @Published private(set) var isPlaying = false
     @Published var isImportPresented = false
+    @Published var importErrorMessage: String?
+    @Published var exportState: TethrExportState = .idle
+    /// Set when a render finishes; drives the "save to…" destination picker.
+    @Published var exportedFileURL: URL?
 
+    private static let logger = Logger(subsystem: "com.nightshape.tethr", category: "import")
     private let bpmRange = 60...200
     private let audioEngine: TethrAudioEngineProtocol
     private let sharedSegmentPipeline: TethrSharedSegmentAnalysisPipeline
     private let compositePlanner: TethrCompositePlanning
     private var pendingImportSlot: TethrSourceSlot = .primary
     private var tapTempoHistory: [Date] = []
+    private var playbackTask: Task<Void, Never>?
 
     init(
         audioEngine: TethrAudioEngineProtocol = TethrAudioEngine(),
@@ -23,6 +45,26 @@ final class TethrEditorViewModel: ObservableObject {
         self.audioEngine = audioEngine
         self.sharedSegmentPipeline = sharedSegmentPipeline
         self.compositePlanner = compositePlanner
+
+        restorePersistedComposition()
+    }
+
+    /// Restores a saved composition on launch. If the snapshot is missing,
+    /// undecodable, or references a sandbox file that no longer exists, the
+    /// stale snapshot is cleared and the app starts in its normal empty state.
+    private func restorePersistedComposition() {
+        guard let snapshot = TethrCompositionStore.load() else { return }
+        guard let restored = snapshot.restoredState() else {
+            TethrCompositionStore.clear()
+            return
+        }
+        project = restored.project
+        composition = restored.composition
+        appScreen = .composite
+    }
+
+    private func persistComposition() {
+        TethrCompositionStore.save(TethrCompositionSnapshot(project: project, composition: composition))
     }
 
     var sourceTitle: String {
@@ -31,6 +73,10 @@ final class TethrEditorViewModel: ObservableObject {
 
     var currentMasterBpm: Int {
         project.masterBpm ?? project.detectedBpm.map { Int($0.rounded()) } ?? 128
+    }
+
+    var waveformBeatMarkers: [TethrBeatMarker] {
+        composition.sharedSegmentMap?.beatMarkers ?? []
     }
 
     var telemetryItems: [TethrTelemetryItem] {
@@ -66,6 +112,35 @@ final class TethrEditorViewModel: ObservableObject {
         ]
     }
 
+    // MARK: - Screen transitions
+
+    func advanceFromLaunch() {
+        guard appScreen == .launch else { return }
+        appScreen = .empty
+    }
+
+    func returnToEmpty() {
+        composition = TethrCompositionState()
+        project = TethrProject()
+        playheadProgress = 0
+        isPlaying = false
+        stopPlayheadUpdates()
+        appScreen = .empty
+        TethrCompositionStore.clear()
+    }
+
+    func presentExport() {
+        guard appScreen == .composite else { return }
+        appScreen = .export
+    }
+
+    func dismissExport() {
+        guard appScreen == .export else { return }
+        appScreen = .composite
+    }
+
+    // MARK: - Import
+
     func presentImport(slot: TethrSourceSlot = .primary) {
         pendingImportSlot = slot
         isImportPresented = true
@@ -75,10 +150,30 @@ final class TethrEditorViewModel: ObservableObject {
         isImportPresented = false
     }
 
+#if DEBUG
+    // DEBUG-IMPORT-FIXTURE: Imports a deterministic local fixture through the
+    // exact same path as a picker selection. Remove with the fixture feature.
+    func importDebugFixture(slot: TethrSourceSlot = .primary) {
+        pendingImportSlot = slot
+        do {
+            let url = try TethrDebugFixture.resolveOrCreate()
+            handleImport(result: .success(url))
+        } catch {
+            let message = (error as? LocalizedError)?.errorDescription
+                ?? error.localizedDescription
+            importErrorMessage = message
+            project.importState = .failed
+        }
+    }
+#endif
+
     func handleImport(result: Result<URL, Error>) {
+        isImportPresented = false
+
         switch result {
         case .success(let url):
             let importSlot = pendingImportSlot
+            importErrorMessage = nil
             project.importState = .reading
             if importSlot == .primary || project.sourceName == nil {
                 project.sourceName = url.lastPathComponent
@@ -93,25 +188,47 @@ final class TethrEditorViewModel: ObservableObject {
             playheadProgress = 0
             isPlaying = false
 
+            if appScreen == .launch || appScreen == .empty {
+                appScreen = .analyzing
+            }
+
             Task {
                 do {
-                    let summary = try await audioEngine.inspectSource(at: url)
+                    let summary = try await audioEngine.importSource(at: url)
                     registerSource(summary, url: url, slot: importSlot)
                     if importSlot == .primary || project.sourceName == nil {
                         project.sourceName = summary.fileName
                         project.sourceDuration = summary.duration
+                        project.detectedBpm = summary.tempoEstimate?.bpm
+                        project.bpmConfidence = summary.tempoEstimate?.confidence
+                        if project.masterBpm == nil, let detectedBpm = summary.tempoEstimate?.bpm {
+                            project.masterBpm = clampedBpm(Int(detectedBpm.rounded()))
+                            project.isMasterBpmManual = false
+                        }
                     }
                     project.importState = .loaded
                     project.correctionState = .conservative
+                    persistComposition()
                 } catch {
+                    let message = (error as? LocalizedError)?.errorDescription
+                        ?? error.localizedDescription
+                    Self.logger.error("Import failed for \(url.lastPathComponent, privacy: .public): \(message, privacy: .public)")
+                    importErrorMessage = message
                     project.importState = .failed
                     project.correctionState = .standby
                     if importSlot == .primary || project.sourceName == nil {
                         project.sourceDuration = nil
                     }
+                    if appScreen == .analyzing {
+                        appScreen = .empty
+                    }
                 }
             }
-        case .failure:
+        case .failure(let error):
+            let message = (error as? LocalizedError)?.errorDescription
+                ?? error.localizedDescription
+            Self.logger.error("File picker failed: \(message, privacy: .public)")
+            importErrorMessage = message
             project.importState = .failed
             project.correctionState = .standby
         }
@@ -120,6 +237,15 @@ final class TethrEditorViewModel: ObservableObject {
     func setMasterBpm(_ bpm: Int) {
         project.masterBpm = clampedBpm(bpm)
         project.isMasterBpmManual = true
+
+        if project.hasSource {
+            project.correctionState = .ready
+            if isPlaying {
+                audioEngine.setPlaybackRate(currentPlaybackRate)
+            }
+            refreshCompositePlan()
+            persistComposition()
+        }
     }
 
     func adjustMasterBpm(from baseBpm: Int, verticalTranslation: Double) {
@@ -141,21 +267,52 @@ final class TethrEditorViewModel: ObservableObject {
         guard averageInterval > 0 else { return }
 
         setMasterBpm(Int((60 / averageInterval).rounded()))
+        project.bpmConfidence = max(project.bpmConfidence ?? 0, 0.82)
     }
 
     func togglePlayback() {
-        guard project.hasSource else {
+        guard let source = composition.source(in: .primary) ?? composition.sources.first,
+              let playableURL = source.originalURL else {
             presentImport()
             return
         }
 
-        isPlaying.toggle()
-        playheadProgress = isPlaying ? max(playheadProgress, 0.08) : playheadProgress
+        if isPlaying {
+            audioEngine.pausePlayback()
+            isPlaying = false
+            stopPlayheadUpdates()
+            return
+        }
+
+        do {
+            try audioEngine.playSource(
+                at: playableURL,
+                from: playheadProgress,
+                rate: currentPlaybackRate
+            )
+            isPlaying = true
+            startPlayheadUpdates(duration: source.duration)
+        } catch {
+            isPlaying = false
+            stopPlayheadUpdates()
+            project.correctionState = .conservative
+        }
     }
 
     func resetPlayhead() {
+        audioEngine.stopPlayback()
+        stopPlayheadUpdates()
         isPlaying = false
         playheadProgress = 0
+    }
+
+    /// Scrub to a normalized position. Restarts playback from there if playing.
+    func seek(to progress: Double) {
+        playheadProgress = min(max(progress, 0), 1)
+        guard isPlaying,
+              let source = composition.source(in: .primary) ?? composition.sources.first,
+              let url = source.originalURL else { return }
+        try? audioEngine.playSource(at: url, from: playheadProgress, rate: currentPlaybackRate)
     }
 
     func registerSource(_ summary: TethrSourceSummary, url: URL?, slot: TethrSourceSlot) {
@@ -163,19 +320,100 @@ final class TethrEditorViewModel: ObservableObject {
             slot: slot,
             fileName: summary.fileName,
             duration: summary.duration,
-            originalURL: url
+            originalURL: summary.playableURL,
+            detectedBpm: summary.tempoEstimate?.bpm,
+            bpmConfidence: summary.tempoEstimate?.confidence
         )
-        composition.upsertSource(source)
-        project.segmentCount = composition.sharedSegmentMap?.segments.count ?? 0
 
-        Task {
-            await analyzeSharedSegmentsIfReady()
+        if slot == .alternate {
+            // TAKE B must NOT wipe the segment map built from TAKE A. Preserve the
+            // shared map + routing across the upsert (which clears analysis for a
+            // source the map doesn't yet know about) and rebuild source IDs.
+            registerAlternateSource(source)
+        } else {
+            // TAKE A (re)import rebuilds structure from scratch.
+            composition.upsertSource(source)
+            project.segmentCount = composition.sharedSegmentMap?.segments.count ?? 0
+            Task { await analyzeSharedSegmentsIfReady() }
         }
+    }
+
+    /// Adds/replaces TAKE B while keeping the existing shared segment map and
+    /// per-segment routing intact (no re-analysis — sections come from TAKE A).
+    private func registerAlternateSource(_ source: TethrSourceTrack) {
+        let savedMap = composition.sharedSegmentMap
+        let savedSelections = composition.selectionsBySegmentID
+        let previousAlternateID = composition.source(in: .alternate)?.id
+
+        composition.upsertSource(source) // may clearSharedAnalysis() for the new ID
+
+        if composition.sharedSegmentMap == nil, var map = savedMap {
+            // upsert cleared it — restore, rebuilding source IDs from current sources.
+            map.sourceIDs = composition.sources.map(\.id)
+            composition.sharedSegmentMap = map
+
+            var selections = savedSelections
+            if let previousAlternateID, previousAlternateID != source.id {
+                // Remap routing from the replaced TAKE B source to the new one.
+                for (segmentID, sourceID) in selections where sourceID == previousAlternateID {
+                    selections[segmentID] = source.id
+                }
+            }
+            composition.selectionsBySegmentID = selections
+        } else if var map = composition.sharedSegmentMap {
+            // Map survived — just keep its source IDs current.
+            map.sourceIDs = composition.sources.map(\.id)
+            composition.sharedSegmentMap = map
+        }
+
+        project.segmentCount = composition.sharedSegmentMap?.segments.count ?? 0
+        refreshCompositePlan()
+        persistComposition()
     }
 
     func selectSource(_ sourceID: TethrSourceTrack.ID, for segmentID: TethrSharedSegment.ID) {
         composition.selectSource(sourceID, for: segmentID)
         refreshCompositePlan()
+        persistComposition()
+    }
+
+    // MARK: - Export
+
+    /// Renders the current TAKE A/B routing into a single file in the sandbox,
+    /// in the requested format (WAV 16/24-bit lossless, or M4A/AAC).
+    func exportComposite(format: TethrExportFormat) {
+        guard exportState != .exporting else { return }
+
+        guard let map = composition.sharedSegmentMap, !map.segments.isEmpty,
+              let primary = composition.source(in: .primary) ?? composition.sources.first,
+              let referenceURL = primary.originalURL else {
+            exportState = .failure(message: TethrExportError.nothingToExport.errorDescription ?? "Nothing to export")
+            return
+        }
+
+        // Build a Sendable render plan on the main actor (selected source per
+        // segment, in timeline order) so rendering can run off-main.
+        let plan: [TethrExportSegment] = map.segments
+            .sorted { $0.index < $1.index }
+            .map { segment in
+                let sourceID = composition.activeSourceID(for: segment.id) ?? primary.id
+                let url = (composition.source(id: sourceID) ?? primary).originalURL ?? referenceURL
+                return TethrExportSegment(sourceURL: url, startTime: segment.startTime, duration: segment.duration)
+            }
+
+        exportState = .exporting
+        Task {
+            do {
+                let outURL = try await Task.detached(priority: .userInitiated) {
+                    try TethrCompositeExporter().export(segments: plan, referenceURL: referenceURL, format: format)
+                }.value
+                exportState = .idle
+                exportedFileURL = outURL // presents the destination picker
+            } catch {
+                let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                exportState = .failure(message: message)
+            }
+        }
     }
 
     private func analyzeSharedSegmentsIfReady() async {
@@ -195,9 +433,16 @@ final class TethrEditorViewModel: ObservableObject {
             project.bpmConfidence = segmentMap.confidence
             project.correctionState = .ready
             refreshCompositePlan()
+            persistComposition()
+            if appScreen == .analyzing {
+                appScreen = .composite
+            }
         } catch {
             project.correctionState = .conservative
             refreshCompositePlan()
+            if appScreen == .analyzing {
+                appScreen = .composite
+            }
         }
     }
 
@@ -212,5 +457,41 @@ final class TethrEditorViewModel: ObservableObject {
 
     private func clampedBpm(_ bpm: Int) -> Int {
         min(max(bpm, bpmRange.lowerBound), bpmRange.upperBound)
+    }
+
+    private var currentPlaybackRate: Double {
+        guard let detectedBpm = project.detectedBpm, detectedBpm > 0 else {
+            return 1
+        }
+
+        return min(2.0, max(0.5, Double(currentMasterBpm) / detectedBpm))
+    }
+
+    private func startPlayheadUpdates(duration: TimeInterval) {
+        stopPlayheadUpdates()
+
+        playbackTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 33_000_000)
+
+                await MainActor.run {
+                    guard let self else { return }
+
+                    let normalizedDuration = max(duration, 0.001)
+                    self.playheadProgress = min(1, max(0, self.audioEngine.currentTime / normalizedDuration))
+
+                    if !self.audioEngine.isPlaybackActive && self.playheadProgress >= 0.995 {
+                        self.isPlaying = false
+                        self.playheadProgress = 0
+                        self.stopPlayheadUpdates()
+                    }
+                }
+            }
+        }
+    }
+
+    private func stopPlayheadUpdates() {
+        playbackTask?.cancel()
+        playbackTask = nil
     }
 }
